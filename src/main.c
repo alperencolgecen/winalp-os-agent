@@ -12,7 +12,7 @@ int main(void) {
     winalp_log(WINALP_LOG_INFO, "WinAlp v%d.%d.%d starting...",
                WINALP_VERSION_MAJOR, WINALP_VERSION_MINOR, WINALP_VERSION_PATCH);
 
-    ui_render_init(1280, 720, "WinAlp");
+    ui_render_init(1280, 720, "WinAlp AI Assistant");
 
     double mockTime = 0.0;
     AgentState state = AGENT_STATE_LISTENING;

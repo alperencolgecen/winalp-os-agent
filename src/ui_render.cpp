@@ -196,6 +196,13 @@ void ui_render_init(int width, int height, const char *title) {
     InitWindow(width, height, title);
     SetTargetFPS(WINALP_TARGET_FPS);
 
+    /* Window icon */
+    Image iconImg = LoadImage("assets/WinAlp.png");
+    if (iconImg.data != NULL) {
+        SetWindowIcon(iconImg);
+        UnloadImage(iconImg);
+    }
+
     ImGui_ImplRaylib_Init(width, height);
 
     ImGuiStyle& style = ImGui::GetStyle();
