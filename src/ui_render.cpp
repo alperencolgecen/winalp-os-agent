@@ -2,6 +2,7 @@
 #include "../include/logger.h"
 
 #include <cstdio>
+#include <cmath>
 #include "raylib.h"
 #include "imgui.h"
 #include "imgui_impl_raylib.h"
@@ -24,28 +25,51 @@ static bool s_chatScrolled = false;
 
 static ImGuiTextFilter s_chatFilter;
 
+/* 3D orb */
+static Camera3D s_orbCamera = { 0 };
+static float s_orbTime = 0.0f;
+
+static Color state_color(AgentState state) {
+    switch (state) {
+        case AGENT_STATE_LISTENING: return (Color){ 0, 212, 255, 255 };
+        case AGENT_STATE_THINKING:  return (Color){ 123, 47, 190, 255 };
+        case AGENT_STATE_WRITING:   return (Color){ 0, 200, 180, 255 };
+        case AGENT_STATE_ACTING:    return (Color){ 245, 158, 11, 255 };
+    }
+    return (Color){ 0, 212, 255, 255 };
+}
+
+static void ui_draw_orb(AgentState state, float amplitude) {
+    Color col = state_color(state);
+    float radius = 1.8f + amplitude * 0.4f;
+
+    s_orbTime += GetFrameTime();
+    float camAngle = s_orbTime * 0.15f;
+
+    float camX = sinf(camAngle) * 7.0f;
+    float camZ = cosf(camAngle) * 7.0f;
+
+    s_orbCamera.position   = (Vector3){ camX, 1.0f, camZ };
+    s_orbCamera.target     = (Vector3){ 0, 0, 0 };
+    s_orbCamera.up         = (Vector3){ 0, 1, 0 };
+    s_orbCamera.fovy       = 35.0f;
+    s_orbCamera.projection = CAMERA_PERSPECTIVE;
+
+    BeginMode3D(s_orbCamera);
+    DrawSphere((Vector3){ 0, 0, 0 }, radius, col);
+    DrawSphere((Vector3){ 0, 0, 0 }, radius * 1.5f,
+               (Color){ col.r, col.g, col.b, 20 });
+    DrawSphereWires((Vector3){ 0, 0, 0 }, radius * 1.1f, 24, 16,
+                    (Color){ 255, 255, 255, 50 });
+    EndMode3D();
+}
+
 static void chat_push(const char *msg) {
     strncpy(s_chatBuffer[s_chatHead], msg, MAX_CHAT_LINE_LEN - 1);
     s_chatBuffer[s_chatHead][MAX_CHAT_LINE_LEN - 1] = '\0';
     s_chatHead = (s_chatHead + 1) % MAX_CHAT_LINES;
     if (s_chatCount < MAX_CHAT_LINES) s_chatCount++;
     s_chatScrolled = true;
-}
-
-static void ui_draw_orb(AgentState state, float amplitude) {
-    float radius = 80.0f + amplitude * 20.0f;
-    Color baseColor;
-    switch (state) {
-        case AGENT_STATE_LISTENING: baseColor = (Color){ 0, 212, 255, 255 }; break;
-        case AGENT_STATE_THINKING:  baseColor = (Color){ 123, 47, 190, 255 }; break;
-        case AGENT_STATE_WRITING:   baseColor = (Color){ 0, 200, 180, 255 }; break;
-        case AGENT_STATE_ACTING:    baseColor = (Color){ 245, 158, 11, 255 }; break;
-    }
-    float cx = s_width / 2.0f;
-    float cy = s_height / 2.0f - 60.0f;
-    DrawCircleV((Vector2){ cx, cy }, radius, baseColor);
-    DrawCircleV((Vector2){ cx, cy }, radius * 0.7f,
-                (Color){ baseColor.r, baseColor.g, baseColor.b, 80 });
 }
 
 static void ui_draw_top_strip(void) {
