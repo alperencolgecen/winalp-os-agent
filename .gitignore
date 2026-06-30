@@ -1,0 +1,50 @@
+# ============================================================
+# WinAlp .gitignore
+# ============================================================
+
+# AI models (large binary files — user supplies these)
+models/*.gguf
+models/*.bin
+models/*.ggml
+
+# Build artifacts
+build/
+bin/
+*.o
+*.obj
+*.exp
+*.pdb
+*.ilk
+*.map
+
+# Static libraries (only commit vendored ones under lib/)
+*.a
+*.lib
+# Re-include vendored libraries in lib/ (must follow the general exclusion)
+!lib/raylib/lib/*.a
+!lib/raylib/lib/*.lib
+
+# Compiled executable
+WinAlp.exe
+
+# User profile data (private, local)
+profile/
+
+# Plugin runtime data
+plugins/*/data/
+
+# OS & editor junk
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+*.user
+
+# Compiler / linker logs
+compile_commands.json
+
+# AI assistant instructions (internal, not for repo)
+CLAUDE.md
