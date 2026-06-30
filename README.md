@@ -74,7 +74,6 @@ WinAlp/
 ├── lib/                  ← Static library archives
 ├── scripts/              ← Lua behavior scripts
 ├── plugins/              ← Extensible plugin packages
-├── prompts/              ← System prompt templates
 ├── build/                ← Compiler intermediates (generated)
 ├── profile/              ← User data (auto-created on first run)
 │   ├── conversations.db
