@@ -7,6 +7,10 @@
 
 static struct whisper_context *s_ctx = NULL;
 
+bool stt_engine_is_loaded(void) {
+    return s_ctx != NULL;
+}
+
 bool stt_engine_load(const char *model_path) {
     if (s_ctx) {
         whisper_free(s_ctx);
@@ -69,6 +73,11 @@ void stt_engine_process(const float *pcm, int n_samples, TranscriptCallback cb, 
     }
 
     int n_segments = whisper_full_n_segments(s_ctx);
+    if (n_segments == 0 && cb) {
+        cb("", ud);
+        return;
+    }
+
     for (int i = 0; i < n_segments; i++) {
         const char *text = whisper_full_get_segment_text(s_ctx, i);
         if (text && text[0] != '\0' && cb) {
