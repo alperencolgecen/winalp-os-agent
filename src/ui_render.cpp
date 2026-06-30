@@ -29,38 +29,68 @@ static ImGuiTextFilter s_chatFilter;
 static Camera3D s_orbCamera = { 0 };
 static float s_orbTime = 0.0f;
 
-static Color state_color(AgentState state) {
+/* Smooth color transition state */
+static AgentState s_lastState = AGENT_STATE_LISTENING;
+static float s_colorLerp[4] = { 0.0f, 212.0f, 255.0f, 255.0f };
+static float s_colorTarget[4] = { 0.0f, 212.0f, 255.0f, 255.0f };
+
+static void state_color_rgba(AgentState state, float out[4]) {
     switch (state) {
-        case AGENT_STATE_LISTENING: return (Color){ 0, 212, 255, 255 };
-        case AGENT_STATE_THINKING:  return (Color){ 123, 47, 190, 255 };
-        case AGENT_STATE_WRITING:   return (Color){ 0, 200, 180, 255 };
-        case AGENT_STATE_ACTING:    return (Color){ 245, 158, 11, 255 };
+        case AGENT_STATE_LISTENING: out[0]=0;  out[1]=212; out[2]=255; out[3]=255; break;
+        case AGENT_STATE_THINKING:  out[0]=123; out[1]=47;  out[2]=190; out[3]=255; break;
+        case AGENT_STATE_WRITING:   out[0]=0;   out[1]=200; out[2]=180; out[3]=255; break;
+        case AGENT_STATE_ACTING:    out[0]=245; out[1]=158; out[2]=11;  out[3]=255; break;
     }
-    return (Color){ 0, 212, 255, 255 };
 }
 
 static void ui_draw_orb(AgentState state, float amplitude) {
-    Color col = state_color(state);
     float radius = 1.8f + amplitude * 0.4f;
 
     s_orbTime += GetFrameTime();
+    float dt = GetFrameTime();
+
+    /* Smooth color interpolation (HSL-style ease, ~200ms transition) */
+    if (state != s_lastState) {
+        state_color_rgba(state, s_colorTarget);
+        s_lastState = state;
+    }
+    float ease = 1.0f - powf(0.01f, dt * 10.0f);  /* ~200ms to 99% */
+    for (int i = 0; i < 4; i++)
+        s_colorLerp[i] += (s_colorTarget[i] - s_colorLerp[i]) * ease;
+
+    Color col;
+    col.r = (unsigned char)s_colorLerp[0];
+    col.g = (unsigned char)s_colorLerp[1];
+    col.b = (unsigned char)s_colorLerp[2];
+    col.a = (unsigned char)s_colorLerp[3];
+
+    /* Orbiting camera */
     float camAngle = s_orbTime * 0.15f;
-
-    float camX = sinf(camAngle) * 7.0f;
-    float camZ = cosf(camAngle) * 7.0f;
-
-    s_orbCamera.position   = (Vector3){ camX, 1.0f, camZ };
-    s_orbCamera.target     = (Vector3){ 0, 0, 0 };
-    s_orbCamera.up         = (Vector3){ 0, 1, 0 };
-    s_orbCamera.fovy       = 35.0f;
+    s_orbCamera.position = (Vector3){ sinf(camAngle) * 7.0f, 1.0f, cosf(camAngle) * 7.0f };
+    s_orbCamera.target   = (Vector3){ 0, 0, 0 };
+    s_orbCamera.up       = (Vector3){ 0, 1, 0 };
+    s_orbCamera.fovy     = 35.0f;
     s_orbCamera.projection = CAMERA_PERSPECTIVE;
 
     BeginMode3D(s_orbCamera);
+
+    /* Core sphere layers */
     DrawSphere((Vector3){ 0, 0, 0 }, radius, col);
     DrawSphere((Vector3){ 0, 0, 0 }, radius * 1.5f,
                (Color){ col.r, col.g, col.b, 20 });
     DrawSphereWires((Vector3){ 0, 0, 0 }, radius * 1.1f, 24, 16,
                     (Color){ 255, 255, 255, 50 });
+
+    /* Orbital rings */
+    float r1 = radius * 1.8f, r2 = radius * 2.2f, r3 = radius * 1.5f;
+
+    DrawCircle3D((Vector3){ 0, 0, 0 }, r1, (Vector3){ 0, 1, 0 }, 0.0f,
+                 (Color){ col.r, col.g, col.b, 100 });
+    DrawCircle3D((Vector3){ 0, 0, 0 }, r2, (Vector3){ 1, 0, 0 },
+                 s_orbTime * 30.0f, (Color){ col.r, col.g, col.b, 70 });
+    DrawCircle3D((Vector3){ 0, 0, 0 }, r3, (Vector3){ 1, 1, 0 },
+                 -s_orbTime * 40.0f, (Color){ 255, 255, 255, 50 });
+
     EndMode3D();
 }
 
