@@ -9,6 +9,10 @@ static struct llama_context *s_ctx   = NULL;
 static struct llama_sampler *s_smpl  = NULL;
 static int s_n_ctx = 0;
 
+bool ai_engine_is_loaded(void) {
+    return s_ctx != NULL && s_model != NULL;
+}
+
 bool ai_engine_load(const char *model_path, int n_gpu_layers) {
     if (s_ctx) ai_engine_unload();
 

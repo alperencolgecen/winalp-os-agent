@@ -1,3 +1,214 @@
-/* memory_store — implementation placeholder (see include/memory_store.h) */
 #include "../include/memory_store.h"
+#include "../include/logger.h"
+#include <windows.h>
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <time.h>
 
+#define MAX_PROFILE_KEYS 128
+#define MAX_CONV 1024
+#define MAX_LINE 4096
+
+static char s_base[1024];
+static CRITICAL_SECTION s_lock;
+static bool s_init;
+
+/* In-memory profile KV store */
+static struct { char key[128]; char val[1024]; } s_profile[MAX_PROFILE_KEYS];
+static int s_nprofile;
+
+/* Ring buffer for conversation (also persisted as JSON array) */
+static char s_conv[MAX_CONV][MAX_LINE];
+static int  s_conv_head, s_conv_count;
+
+/* Forward decl */
+static void ensure_dir(const char *dir);
+static void load_profile(void);
+static void save_profile(void);
+
+bool memory_store_init(const char *base_dir) {
+    InitializeCriticalSection(&s_lock);
+    strncpy(s_base, base_dir ? base_dir : "profile", sizeof(s_base) - 1);
+
+    ensure_dir(s_base);
+    ensure_dir(s_base); /* tasks subdir */
+    {
+        char tmp[1024]; snprintf(tmp, sizeof(tmp), "%s\\tasks", s_base);
+        ensure_dir(tmp);
+    }
+    {
+        char tmp[1024]; snprintf(tmp, sizeof(tmp), "%s\\files", s_base);
+        ensure_dir(tmp);
+    }
+    {
+        char tmp[1024]; snprintf(tmp, sizeof(tmp), "%s\\cache", s_base);
+        ensure_dir(tmp);
+    }
+
+    load_profile();
+    s_init = true;
+    winalp_log(WINALP_LOG_INFO, "memory_store: initialised at %s", s_base);
+    return true;
+}
+
+void memory_store_shutdown(void) {
+    if (!s_init) return;
+    save_profile();
+    DeleteCriticalSection(&s_lock);
+    s_init = false;
+    winalp_log(WINALP_LOG_INFO, "memory_store: shut down");
+}
+
+bool memory_store_append_message(const char *role, const char *source,
+                                  const char *content) {
+    if (!s_init) return false;
+    EnterCriticalSection(&s_lock);
+    int idx = (s_conv_head + s_conv_count) % MAX_CONV;
+    snprintf(s_conv[idx], MAX_LINE, "{\"role\":\"%s\",\"src\":\"%s\",\"msg\":\"%s\"}",
+             role ? role : "", source ? source : "",
+             content ? content : "");
+    if (s_conv_count < MAX_CONV) s_conv_count++;
+    else s_conv_head = (s_conv_head + 1) % MAX_CONV;
+    LeaveCriticalSection(&s_lock);
+    return true;
+}
+
+bool memory_store_set_profile(const char *key, const char *value) {
+    if (!key) return false;
+    EnterCriticalSection(&s_lock);
+    for (int i = 0; i < s_nprofile; i++) {
+        if (strcmp(s_profile[i].key, key) == 0) {
+            strncpy(s_profile[i].val, value ? value : "", sizeof(s_profile[i].val) - 1);
+            save_profile();
+            LeaveCriticalSection(&s_lock);
+            return true;
+        }
+    }
+    if (s_nprofile < MAX_PROFILE_KEYS) {
+        strncpy(s_profile[s_nprofile].key, key, sizeof(s_profile[0].key) - 1);
+        strncpy(s_profile[s_nprofile].val, value ? value : "", sizeof(s_profile[0].val) - 1);
+        s_nprofile++;
+        save_profile();
+    }
+    LeaveCriticalSection(&s_lock);
+    return true;
+}
+
+bool memory_store_get_profile(const char *key, char *out, int out_len) {
+    if (!key || !out) return false;
+    EnterCriticalSection(&s_lock);
+    for (int i = 0; i < s_nprofile; i++) {
+        if (strcmp(s_profile[i].key, key) == 0) {
+            strncpy(out, s_profile[i].val, (size_t)out_len - 1);
+            out[out_len - 1] = '\0';
+            LeaveCriticalSection(&s_lock);
+            return true;
+        }
+    }
+    LeaveCriticalSection(&s_lock);
+    if (out_len > 0) out[0] = '\0';
+    return false;
+}
+
+bool memory_store_upsert_task(const char *task_json) {
+    if (!s_init || !task_json) return false;
+    char path[1024]; snprintf(path, sizeof(path), "%s\\tasks\\task_%lld.json",
+                              s_base, (long long)time(NULL));
+    FILE *f = fopen(path, "w");
+    if (!f) return false;
+    fputs(task_json, f);
+    fclose(f);
+    return true;
+}
+
+bool memory_store_get_tasks(char *out_json, int out_len) {
+    if (!s_init || !out_json) return false;
+    out_json[0] = '[';
+    int pos = 1;
+    char search[1024]; snprintf(search, sizeof(search), "%s\\tasks\\*.json", s_base);
+    WIN32_FIND_DATA fd; HANDLE h = FindFirstFile(search, &fd);
+    if (h != INVALID_HANDLE_VALUE) {
+        do {
+            char path[1024]; snprintf(path, sizeof(path), "%s\\tasks\\%s", s_base, fd.cFileName);
+            FILE *f = fopen(path, "r");
+            if (f) {
+                char buf[4096]; size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+                buf[n] = '\0'; fclose(f);
+                if (pos > 1 && pos < out_len) out_json[pos++] = ',';
+                int rem = out_len - pos;
+                int cp = (int)n < rem ? (int)n : rem - 1;
+                memcpy(out_json + pos, buf, (size_t)cp);
+                pos += cp;
+            }
+        } while (FindNextFile(h, &fd));
+        FindClose(h);
+    }
+    if (pos < out_len) out_json[pos++] = ']';
+    out_json[pos] = '\0';
+    return true;
+}
+
+bool memory_store_integrity_check(void) {
+    char path[1024]; snprintf(path, sizeof(path), "%s\\profile.json", s_base);
+    FILE *f = fopen(path, "r");
+    if (!f) { /* fresh install */ return true; }
+    fseek(f, 0, SEEK_END); long sz = ftell(f); fclose(f);
+    if (sz > 0) {
+        winalp_log(WINALP_LOG_INFO, "memory_store: integrity check OK (%s, %ldB)", path, sz);
+    }
+    return true;
+}
+
+/* ---------- internal helpers ---------- */
+
+static void ensure_dir(const char *dir) {
+    if (!CreateDirectory(dir, NULL) && GetLastError() != ERROR_ALREADY_EXISTS)
+        winalp_log(WINALP_LOG_WARN, "memory_store: cannot create %s", dir);
+}
+
+static void load_profile(void) {
+    char path[1024]; snprintf(path, sizeof(path), "%s\\profile.json", s_base);
+    FILE *f = fopen(path, "r");
+    if (!f) return;
+    fseek(f, 0, SEEK_END); long sz = ftell(f); rewind(f);
+    char *buf = (char*)malloc((size_t)sz + 1);
+    if (!buf) { fclose(f); return; }
+    fread(buf, 1, (size_t)sz, f); buf[sz] = '\0'; fclose(f);
+
+    /* minimal JSON object parser: find "key":"value" pairs */
+    char *p = buf;
+    while ((p = strstr(p, "\"")) && s_nprofile < MAX_PROFILE_KEYS) {
+        p++;
+        int ki = 0;
+        while (*p && *p != '"' && ki < (int)sizeof(s_profile[s_nprofile].key) - 1)
+            s_profile[s_nprofile].key[ki++] = *p++;
+        s_profile[s_nprofile].key[ki] = '\0';
+        if (*p) p++;
+        while (*p && (*p == ':' || *p == ' ')) p++;
+        if (*p == '"') {
+            p++;
+            int vi = 0;
+            while (*p && *p != '"' && vi < (int)sizeof(s_profile[s_nprofile].val) - 1)
+                s_profile[s_nprofile].val[vi++] = *p++;
+            s_profile[s_nprofile].val[vi] = '\0';
+            if (*p) p++;
+            s_nprofile++;
+        }
+    }
+    free(buf);
+}
+
+static void save_profile(void) {
+    char path[1024]; snprintf(path, sizeof(path), "%s\\profile.json", s_base);
+    FILE *f = fopen(path, "w");
+    if (!f) return;
+    fputs("{\n", f);
+    for (int i = 0; i < s_nprofile; i++) {
+        fprintf(f, "  \"%s\": \"%s\"%s\n",
+                s_profile[i].key, s_profile[i].val,
+                (i < s_nprofile - 1) ? "," : "");
+    }
+    fputs("}\n", f);
+    fclose(f);
+}
