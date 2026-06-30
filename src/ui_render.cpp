@@ -74,22 +74,29 @@ static void ui_draw_orb(AgentState state, float amplitude) {
 
     BeginMode3D(s_orbCamera);
 
-    /* Core sphere layers */
-    DrawSphere((Vector3){ 0, 0, 0 }, radius, col);
-    DrawSphere((Vector3){ 0, 0, 0 }, radius * 1.5f,
-               (Color){ col.r, col.g, col.b, 20 });
-    DrawSphereWires((Vector3){ 0, 0, 0 }, radius * 1.1f, 24, 16,
-                    (Color){ 255, 255, 255, 50 });
+    /* Amplitude-driven morphing — orb breathes with audio/mock RMS */
+    float breath  = 0.7f + 0.3f * amplitude;
+    int glowAlpha = 15 + (int)(amplitude * 25.0f);
+    int wireAlpha = 30 + (int)(amplitude * 40.0f);
 
-    /* Orbital rings */
-    float r1 = radius * 1.8f, r2 = radius * 2.2f, r3 = radius * 1.5f;
+    DrawSphere((Vector3){ 0, 0, 0 }, radius, col);
+    DrawSphere((Vector3){ 0, 0, 0 }, radius * 1.5f * breath,
+               (Color){ col.r, col.g, col.b, (unsigned char)glowAlpha });
+    DrawSphereWires((Vector3){ 0, 0, 0 }, radius * 1.1f, 24, 16,
+                    (Color){ 255, 255, 255, (unsigned char)wireAlpha });
+
+    /* Rings pulse radius and brightness with amplitude */
+    float r1 = radius * (1.6f + 0.4f * amplitude);
+    float r2 = radius * (2.0f + 0.4f * amplitude);
+    float r3 = radius * (1.3f + 0.3f * amplitude);
+    int rAlpha = 60 + (int)(amplitude * 60.0f);
 
     DrawCircle3D((Vector3){ 0, 0, 0 }, r1, (Vector3){ 0, 1, 0 }, 0.0f,
-                 (Color){ col.r, col.g, col.b, 100 });
+                 (Color){ col.r, col.g, col.b, (unsigned char)rAlpha });
     DrawCircle3D((Vector3){ 0, 0, 0 }, r2, (Vector3){ 1, 0, 0 },
-                 s_orbTime * 30.0f, (Color){ col.r, col.g, col.b, 70 });
+                 s_orbTime * 30.0f, (Color){ col.r, col.g, col.b, (unsigned char)(rAlpha * 0.7f) });
     DrawCircle3D((Vector3){ 0, 0, 0 }, r3, (Vector3){ 1, 1, 0 },
-                 -s_orbTime * 40.0f, (Color){ 255, 255, 255, 50 });
+                 -s_orbTime * 40.0f, (Color){ 255, 255, 255, (unsigned char)(rAlpha * 0.5f) });
 
     EndMode3D();
 }
