@@ -13,6 +13,7 @@ CXXFLAGS = -std=c++17 -O2 -Wall -Wextra -DWIN32_LEAN_AND_MEAN $(INCS)
 LDFLAGS  = -Llib/raylib/lib -Llib/whisper \
            -lraylib -lopengl32 -lgdi32 -lwinmm -lole32 -luuid -ldxgi -ld3d11 \
            -lwhisper -lggml -lggml-cpu -lggml-base \
+           -lksuser \
            -static -lstdc++ -lwinpthread -fopenmp
 
 TARGET  = WinAlp.exe

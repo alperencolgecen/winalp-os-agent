@@ -7,6 +7,7 @@
 #include "../include/logger.h"
 #include "../include/ui_render.h"
 #include "../include/stt_engine.h"
+#include "../include/audio_capture.h"
 
 /* VAD states for mock speech cycle demo */
 enum VadState {
@@ -24,13 +25,6 @@ static void on_transcript(const char *text, void *ud) {
     }
 }
 
-/* Generate n_samples of a sine tone at freq_hz (sample_rate=16000) */
-static void fill_test_tone(float *buf, int n_samples, double freq_hz) {
-    for (int i = 0; i < n_samples; i++) {
-        buf[i] = 0.25f * (float)sin(2.0 * 3.14159265 * freq_hz * i / 16000.0);
-    }
-}
-
 int main(void) {
     winalp_log_init("winalp.log");
     winalp_log(WINALP_LOG_INFO, "WinAlp v%d.%d.%d starting...",
@@ -44,11 +38,17 @@ int main(void) {
         winalp_log(WINALP_LOG_WARN, "STT model not found at %s — run 'make download-stt-model'", model_path);
     }
 
+    /* Start microphone capture */
+    bool mic_ok = audio_capture_start();
+    if (!mic_ok)
+        winalp_log(WINALP_LOG_WARN, "Mic unavailable — using mock amplitude");
+
     ui_render_init(1280, 720, "WinAlp AI Assistant");
 
     char ctx_label[64];
-    snprintf(ctx_label, sizeof(ctx_label), "STT: %s",
-             stt_engine_is_loaded() ? "loaded" : "offline");
+    snprintf(ctx_label, sizeof(ctx_label), "Mic: %s | STT: %s",
+             mic_ok ? "live" : "mock",
+             stt_engine_is_loaded() ? "ready" : "offline");
     ui_render_set_context_label(ctx_label);
 
     double mockTime = 0.0;
@@ -58,10 +58,14 @@ int main(void) {
     double       speechEnd = 0.0;
 
     while (!ui_render_should_close()) {
-        double dt  = 1.0 / 60.0;
-        mockTime  += dt;
+        double dt = 1.0 / 60.0;
+        mockTime += dt;
 
-        float amplitude = 0.5f + 0.5f * (float)sin(mockTime * 2.5f);
+        float amplitude;
+        if (mic_ok)
+            amplitude = audio_capture_rms();
+        else
+            amplitude = 0.5f + 0.5f * (float)sin(mockTime * 2.5f);
 
         switch (vad) {
 
@@ -81,14 +85,13 @@ int main(void) {
 
         case VAD_PROCESSING:
             state = AGENT_STATE_THINKING;
-            if (stt_engine_is_loaded()) {
-                /* Feed 1 saniyelik 440Hz test tonu ile erkek konuşması
-                   yakalanmasa bile pipeline test edilmiş olur. */
-                float test_buf[16000];
-                fill_test_tone(test_buf, 16000, 440.0);
-                stt_engine_process(test_buf, 16000, on_transcript, NULL);
+            if (stt_engine_is_loaded() && mic_ok) {
+                float pcm[16000 * 2];
+                int n = audio_capture_read(pcm, 16000 * 2);
+                if (n > 0)
+                    stt_engine_process(pcm, n, on_transcript, NULL);
             } else {
-                on_transcript("(STT offline — model eksik)", NULL);
+                on_transcript("(STT offline — model/mic eksik)", NULL);
             }
             vad = VAD_RESPONDING;
             break;
@@ -104,6 +107,7 @@ int main(void) {
     }
 
     ui_render_shutdown();
+    audio_capture_stop();
     stt_engine_unload();
     winalp_log(WINALP_LOG_INFO, "WinAlp shutdown complete");
     winalp_log_shutdown();
