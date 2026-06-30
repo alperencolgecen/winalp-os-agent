@@ -6,14 +6,14 @@
 
 CC       = gcc
 CXX      = g++
-CFLAGS   = -std=c11 -O2 -Wall -Wextra -DWIN32_LEAN_AND_MEAN \
-            -Iinclude -Ilib/raylib/include -Ilib/imgui
-CXXFLAGS = -std=c++17 -O2 -Wall -Wextra -DWIN32_LEAN_AND_MEAN \
-            -Iinclude -Ilib/raylib/include -Ilib/imgui
-LDFLAGS  = -Llib/raylib/lib \
-            -lraylib -lopengl32 -lgdi32 -lwinmm \
-            -lole32 -luuid -ldxgi -ld3d11 \
-            -static -lstdc++ -lwinpthread
+INCS     = -Iinclude -Ilib/raylib/include -Ilib/imgui \
+           -Ilib/whisper.cpp/include -Ilib/whisper.cpp/ggml/include
+CFLAGS   = -std=c11 -O2 -Wall -Wextra -DWIN32_LEAN_AND_MEAN $(INCS)
+CXXFLAGS = -std=c++17 -O2 -Wall -Wextra -DWIN32_LEAN_AND_MEAN $(INCS)
+LDFLAGS  = -Llib/raylib/lib -Llib/whisper \
+           -lraylib -lopengl32 -lgdi32 -lwinmm -lole32 -luuid -ldxgi -ld3d11 \
+           -lwhisper -lggml -lggml-cpu -lggml-base \
+           -static -lstdc++ -lwinpthread -fopenmp
 
 TARGET  = WinAlp.exe
 BUILDDIR= build
@@ -24,7 +24,6 @@ LIBDIR  = lib
 C_SRCS = $(SRCDIR)/main.c \
          $(SRCDIR)/logger.c \
          $(SRCDIR)/ai_engine.c \
-         $(SRCDIR)/stt_engine.c \
          $(SRCDIR)/audio_capture.c \
          $(SRCDIR)/vision_engine.c \
          $(SRCDIR)/system_agent.c \
@@ -35,8 +34,9 @@ C_SRCS = $(SRCDIR)/main.c \
          $(SRCDIR)/prompt_engine.c \
          $(SRCDIR)/plugin_manager.c
 
-# C++ source files (project modules using C++ + ImGui, ImPlot, raylib backend)
+# C++ source files (project modules + ImGui + ImPlot + raylib backend)
 CXX_SRCS = $(SRCDIR)/ui_render.cpp \
+           $(SRCDIR)/stt_engine.cpp \
            $(LIBDIR)/imgui/imgui.cpp \
            $(LIBDIR)/imgui/imgui_draw.cpp \
            $(LIBDIR)/imgui/imgui_tables.cpp \
@@ -48,34 +48,34 @@ CXX_SRCS = $(SRCDIR)/ui_render.cpp \
            $(LIBDIR)/imgui/imgui_impl_raylib.cpp
 
 C_OBJS = $(patsubst $(SRCDIR)/%.c, $(BUILDDIR)/%.o, $(C_SRCS))
-
-# C++ objects: map src/%.cpp -> build/%.o and lib/imgui/%.cpp -> build/imgui/%.o
 CXX_SRC_OBJS = $(patsubst $(SRCDIR)/%.cpp, $(BUILDDIR)/%.o, $(filter $(SRCDIR)/%.cpp, $(CXX_SRCS)))
 CXX_LIB_OBJS = $(patsubst $(LIBDIR)/%.cpp, $(BUILDDIR)/%.o, $(filter $(LIBDIR)/%.cpp, $(CXX_SRCS)))
-CXX_OBJS = $(CXX_SRC_OBJS) $(CXX_LIB_OBJS)
-OBJS = $(C_OBJS) $(CXX_OBJS)
+ALL_OBJS = $(C_OBJS) $(CXX_SRC_OBJS) $(CXX_LIB_OBJS)
 
-.PHONY: all clean run
+.PHONY: all clean run whisper-libs
 
-all: $(BUILDDIR) $(TARGET)
+all: whisper-libs $(BUILDDIR) $(TARGET)
+
+whisper-libs:
+	@test -f "$(LIBDIR)/whisper/libwhisper.a" || { \
+	    echo "Building whisper.cpp static libraries..."; \
+	    "scripts/build_whisper.bat"; \
+	}
 
 $(BUILDDIR):
-	mkdir -p $(BUILDDIR) $(BUILDDIR)/imgui
+	mkdir -p $(BUILDDIR)/imgui
 
-# C compilation
 $(BUILDDIR)/%.o: $(SRCDIR)/%.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
-# C++ compilation (project modules in src/)
 $(BUILDDIR)/%.o: $(SRCDIR)/%.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-# C++ compilation (vendored libs in lib/imgui/)
 $(BUILDDIR)/imgui/%.o: $(LIBDIR)/imgui/%.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
-$(TARGET): $(OBJS)
-	$(CXX) $(OBJS) -o $@ $(LDFLAGS)
+$(TARGET): $(ALL_OBJS)
+	$(CXX) $(ALL_OBJS) -o $@ $(LDFLAGS)
 	@echo "Build complete: $(TARGET)"
 
 run: all
@@ -84,7 +84,15 @@ run: all
 clean:
 	rm -rf $(BUILDDIR) $(TARGET)
 
-# ---- Test target (single-file raylib smoke test) ----
-test_raylib: $(BUILDDIR)
-	$(CC) $(CFLAGS) build/test_raylib.c -o build/test_raylib.exe $(LDFLAGS)
-	@echo "Raylib test built: build/test_raylib.exe"
+# ---------- Download STT model (Whisper tiny, ~75MB) ----------
+WHISPER_MODEL_URL = https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin
+WHISPER_MODEL_PATH = models/ggml-tiny.bin
+
+download-stt-model:
+	powershell -Command "if (-not (Test-Path '$(WHISPER_MODEL_PATH)')) { \
+	    Write-Host 'Downloading whisper tiny model...'; \
+	    curl.exe -L -o '$(WHISPER_MODEL_PATH)' '$(WHISPER_MODEL_URL)'; \
+	    Write-Host 'Downloaded: $(WHISPER_MODEL_PATH)'; \
+	} else { \
+	    Write-Host 'Model already exists: $(WHISPER_MODEL_PATH)'; \
+	}"
