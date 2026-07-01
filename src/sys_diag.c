@@ -57,12 +57,12 @@ bool sys_diag_detect(SysDiag *d) {
                     IDXGIAdapter *pAdapter = NULL;
                     /* vtable call: EnumAdapters */
                     HRESULT (STDMETHODCALLTYPE *enumFn)(IDXGIFactory*, UINT, IDXGIAdapter**) =
-                        (void*)pFactory->lpVtbl;
+                        (void*)((void***)pFactory)[0][7];
                     if (SUCCEEDED(enumFn(pFactory, 0, &pAdapter))) {
                         DXGI_ADAPTER_DESC desc;
                         /* vtable call: GetDesc */
                         HRESULT (STDMETHODCALLTYPE *getDescFn)(IDXGIAdapter*, DXGI_ADAPTER_DESC*) =
-                            (void*)pAdapter->lpVtbl;
+                            (void*)((void***)pAdapter)[0][8];
                         if (SUCCEEDED(getDescFn(pAdapter, &desc))) {
                             int len = WideCharToMultiByte(CP_UTF8, 0, desc.Description, -1,
                                                            d->gpu_name, (int)sizeof(d->gpu_name),

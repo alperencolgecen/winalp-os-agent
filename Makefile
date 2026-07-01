@@ -19,7 +19,7 @@ LDFLAGS  = -Llib/raylib/lib \
            -Llib/llama -lllama -lggml -lggml-cpu -lggml-base \
            -Llib/lua -llua \
            -lraylib -lopengl32 -lgdi32 -lwinmm -lole32 -luuid -ldxgi -ld3d11 \
-            -lksuser -lcrypt32 -lm \
+            -lksuser -lcrypt32 -lm -liphlpapi \
            -static -lstdc++ -lwinpthread -fopenmp \
            -Wl,--allow-multiple-definition
 
@@ -43,9 +43,10 @@ C_SRCS = $(SRCDIR)/main.c \
           $(SRCDIR)/thread_mutex.c \
           $(SRCDIR)/dpapi_crypt.c \
           $(SRCDIR)/sys_diag.c \
-          $(SRCDIR)/thread_pool.c \
-           $(SRCDIR)/doc_router.c \
-           $(SRCDIR)/vlm_engine.c
+           $(SRCDIR)/thread_pool.c \
+            $(SRCDIR)/doc_router.c \
+            $(SRCDIR)/vlm_engine.c \
+            $(SRCDIR)/sys_monitor.c
 
 # C++ source files (project modules + ImGui + ImPlot + raylib backend)
 CXX_SRCS = $(SRCDIR)/ui_render.cpp \
@@ -113,7 +114,7 @@ $(BUILDDIR)/mtmd/%.o: $(MTMD_DIR)/%.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(TARGET): $(ALL_OBJS)
-	$(CXX) $(ALL_OBJS) -o $@ $(LDFLAGS)
+	$(CXX) $(ALL_OBJS) -o $@ -mwindows $(LDFLAGS)
 	@echo "Build complete: $(TARGET)"
 
 run: all

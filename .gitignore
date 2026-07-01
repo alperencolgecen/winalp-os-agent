@@ -3,9 +3,7 @@
 # ============================================================
 
 # AI models (large binary files — user supplies these)
-models/*.gguf
-models/*.bin
-models/*.ggml
+models/
 
 # Build artifacts
 build/
@@ -26,9 +24,17 @@ bin/
 
 # Compiled executable
 WinAlp.exe
+winalp.log
+tests/WinAlp_tests.exe
 
 # User profile data (private, local)
 profile/
+
+# Runtime logs
+winalp.log
+
+# User prompts (auto-created at startup)
+prompts/default.txt
 
 # Plugin runtime data
 plugins/*/data/

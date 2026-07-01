@@ -69,6 +69,7 @@ void ImGui_ImplRaylib_NewFrame(void) {
 }
 
 void ImGui_ImplRaylib_RenderDrawData(void) {
+    ImGui::Render();
     ImDrawData* drawData = ImGui::GetDrawData();
     if (!drawData || drawData->CmdListsCount == 0) return;
 
