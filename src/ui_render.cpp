@@ -34,6 +34,106 @@ static AgentState s_lastState = AGENT_STATE_LISTENING;
 static float s_colorLerp[4] = { 0.0f, 212.0f, 255.0f, 255.0f };
 static float s_colorTarget[4] = { 0.0f, 212.0f, 255.0f, 255.0f };
 
+/* Model selection screen */
+char *ui_render_model_select(ModelEntry *models, int n_models) {
+    if (n_models <= 0) return NULL;
+
+    InitWindow(800, 500, "WinAlp — Model Selection");
+    SetTargetFPS(60);
+
+    int selected = -1;
+    int scroll   = 0;
+    int hovered  = -1;
+    Font font = GetFontDefault();
+
+    while (!WindowShouldClose()) {
+        int mw = GetScreenWidth();
+        int mh = GetScreenHeight();
+        Vector2 mp = GetMousePosition();
+        hovered = -1;
+
+        BeginDrawing();
+        ClearBackground((Color){ 8, 12, 20, 255 });
+
+        /* Title */
+        DrawTextEx(font, "SELECT MODEL", (Vector2){ 40, 20 }, 28, 1, (Color){ 0, 212, 255, 255 });
+        DrawTextEx(font, "Choose a brain model to start WinAlp",
+                   (Vector2){ 40, 55 }, 14, 1, (Color){ 128, 140, 160, 255 });
+
+        /* List models */
+        int x = 40, y = 90, item_h = 48;
+        for (int i = 0; i < n_models; i++) {
+            int cy = y + (i - scroll) * item_h;
+            if (cy + item_h < 90 || cy > mh - 20) continue;
+
+            /* Hover/click detection */
+            Rectangle rect = { (float)x, (float)cy, (float)(mw - 80), (float)item_h };
+            bool inside = CheckCollisionPointRec(mp, rect);
+            if (inside) hovered = i;
+
+            /* Background */
+            Color bg = (i == selected) ? (Color){ 0, 100, 180, 100 } :
+                       inside           ? (Color){ 40, 50, 70, 100 } :
+                                          (Color){ 15, 20, 30, 80 };
+            DrawRectangleRec(rect, bg);
+
+            /* Tier indicator */
+            Color tier_col;
+            switch (models[i].tier) {
+                case 2: tier_col = (Color){ 0, 200, 180, 255 }; break; /* vision=teal */
+                default: tier_col = (Color){ 100, 180, 255, 255 }; break; /* text=blue */
+            }
+            DrawCircle(x + 12, cy + item_h/2, 6, tier_col);
+
+            /* Name + size */
+            char label[512];
+            snprintf(label, sizeof(label), "%s  (%llu MB)",
+                     models[i].label, models[i].size_mb);
+            DrawTextEx(font, label, (Vector2){ (float)(x + 30), (float)(cy + 6) },
+                       16, 1, (Color){ 220, 230, 240, 255 });
+
+            /* Tier label */
+            const char *tier_str = (models[i].tier == 2) ? "Vision" : "Text";
+            DrawTextEx(font, tier_str,
+                       (Vector2){ (float)(mw - 120), (float)(cy + 8) },
+                       12, 1, tier_col);
+        }
+
+        /* Scroll hint */
+        DrawTextEx(font, "Click a model to select  |  ESC to exit",
+                   (Vector2){ 40, (float)(mh - 30) }, 12, 1,
+                   (Color){ 80, 90, 110, 200 });
+
+        /* Handle input */
+        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && hovered >= 0) {
+            selected = hovered;
+        }
+        /* Wheel */
+        scroll -= (int)GetMouseWheelMove();
+        if (scroll < 0) scroll = 0;
+        if (scroll > n_models - 1) scroll = n_models - 1;
+        if (scroll < 0) scroll = 0;
+
+        EndDrawing();
+
+        /* Confirm selection */
+        if (selected >= 0 && (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) || IsKeyPressed(KEY_ENTER))) {
+            char *result = (char*)malloc(strlen(models[selected].path) + 1);
+            if (result) strcpy(result, models[selected].path);
+            CloseWindow();
+            return result;
+        }
+
+        if (IsKeyPressed(KEY_ESCAPE)) {
+            CloseWindow();
+            return NULL;
+        }
+    }
+
+    CloseWindow();
+    return NULL;
+}
+
 static void state_color_rgba(AgentState state, float out[4]) {
     switch (state) {
         case AGENT_STATE_LISTENING: out[0]=0;  out[1]=212; out[2]=255; out[3]=255; break;

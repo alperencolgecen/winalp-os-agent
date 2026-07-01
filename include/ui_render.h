@@ -10,6 +10,16 @@
 extern "C" {
 #endif
 
+typedef struct {
+    char path[512];
+    char label[256];
+    unsigned long long size_mb;
+    int tier; /* 0=unknown, 1=text, 2=vision */
+} ModelEntry;
+
+/* Model selection screen — returns strdup'd path or NULL on exit */
+char *ui_render_model_select(ModelEntry *models, int n_models);
+
 void ui_render_init(int width, int height, const char *title);
 void ui_render_frame(AgentState state, float amplitude);
 void ui_render_push_chat(const char *role, const char *text, const char *source_icon);

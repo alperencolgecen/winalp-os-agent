@@ -73,13 +73,47 @@ int main(void) {
     else
         winalp_log(WINALP_LOG_WARN, "STT model not found: %s", stt_path);
 
-    /* AI engine */
-    const char *llm_path = "models/brain-model.gguf";
-    bool ai_ok = ai_engine_load(llm_path, 0);
-    if (ai_ok)
-        winalp_log(WINALP_LOG_INFO, "AI engine ready");
-    else
-        winalp_log(WINALP_LOG_WARN, "AI model not found: %s", llm_path);
+    /* Scan models/ for .gguf files and show selection screen */
+    ModelEntry models[64]; int n_models = 0;
+    WIN32_FIND_DATA fd;
+    HANDLE hf = FindFirstFileA("models\\*.gguf", &fd);
+    if (hf != INVALID_HANDLE_VALUE) {
+        do {
+            if (n_models >= 64) break;
+            strncpy(models[n_models].label, fd.cFileName, sizeof(models[n_models].label) - 1);
+            snprintf(models[n_models].path, sizeof(models[n_models].path), "models\\%s", fd.cFileName);
+            ULARGE_INTEGER sz;
+            sz.LowPart  = fd.nFileSizeLow;
+            sz.HighPart = fd.nFileSizeHigh;
+            models[n_models].size_mb = sz.QuadPart / (1024 * 1024);
+            models[n_models].tier = models[n_models].size_mb > 8000 ? 2 : 1;
+            n_models++;
+        } while (FindNextFileA(hf, &fd));
+        FindClose(hf);
+    }
+
+    char selected_model[1024] = "";
+    if (n_models == 1) {
+        strncpy(selected_model, models[0].path, sizeof(selected_model) - 1);
+        winalp_log(WINALP_LOG_INFO, "model: auto-selected %s", selected_model);
+    } else if (n_models > 1) {
+        char *sel = ui_render_model_select(models, n_models);
+        if (sel) {
+            strncpy(selected_model, sel, sizeof(selected_model) - 1);
+            free(sel);
+        }
+    }
+
+    bool ai_ok = false;
+    if (selected_model[0]) {
+        ai_ok = ai_engine_load(selected_model, 0);
+        if (ai_ok)
+            winalp_log(WINALP_LOG_INFO, "AI engine ready: %s", selected_model);
+        else
+            winalp_log(WINALP_LOG_WARN, "AI engine failed: %s", selected_model);
+    } else {
+        winalp_log(WINALP_LOG_WARN, "No GGUF model found in models/");
+    }
 
     /* Prompt engine + plugins */
     prompt_engine_init("prompts");
