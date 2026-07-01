@@ -93,12 +93,18 @@ int main(void) {
     CreateDirectoryA("scripts", NULL);
     CreateDirectoryA("work", NULL);
 
-    /* STT */
+    /* STT — auto-download if missing */
     const char *stt_path = "models/ggml-tiny.bin";
-    if (stt_engine_load(stt_path))
+    if (!stt_engine_load(stt_path)) {
+        winalp_log(WINALP_LOG_INFO, "STT model not found — auto-downloading (75MB)...");
+        system("powershell -Command \"Invoke-WebRequest -Uri 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin' -OutFile 'models\\ggml-tiny.bin' -UseBasicParsing\"");
+        if (stt_engine_load(stt_path))
+            winalp_log(WINALP_LOG_INFO, "STT ready after auto-download");
+        else
+            winalp_log(WINALP_LOG_WARN, "STT download failed");
+    } else {
         winalp_log(WINALP_LOG_INFO, "STT ready");
-    else
-        winalp_log(WINALP_LOG_WARN, "STT model not found: %s", stt_path);
+    }
 
     /* Model selection */
     ModelEntry models[64]; int n_models = 0;

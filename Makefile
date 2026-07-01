@@ -146,7 +146,7 @@ WHISPER_MODEL_PATH = models/ggml-tiny.bin
 download-stt-model:
 	powershell -Command "if (-not (Test-Path '$(WHISPER_MODEL_PATH)')) { \
 	    Write-Host 'Downloading whisper tiny model...'; \
-	    curl.exe -L -o '$(WHISPER_MODEL_PATH)' '$(WHISPER_MODEL_URL)'; \
+	    Invoke-WebRequest -Uri '$(WHISPER_MODEL_URL)' -OutFile '$(WHISPER_MODEL_PATH)' -UseBasicParsing; \
 	    Write-Host 'Downloaded: $(WHISPER_MODEL_PATH)'; \
 	} else { \
 	    Write-Host 'Model already exists: $(WHISPER_MODEL_PATH)'; \
@@ -159,7 +159,7 @@ QWEN_MODEL_PATH = models/brain-model.gguf
 download-ai-model:
 	powershell -Command "if (-not (Test-Path '$(QWEN_MODEL_PATH)')) { \
 	    Write-Host 'Downloading Qwen 1.5B Q4_K_M (~1GB) ...'; \
-	    curl.exe -L -o '$(QWEN_MODEL_PATH)' '$(QWEN_MODEL_URL)'; \
+	    Invoke-WebRequest -Uri '$(QWEN_MODEL_URL)' -OutFile '$(QWEN_MODEL_PATH)' -UseBasicParsing; \
 	    Write-Host 'Downloaded: $(QWEN_MODEL_PATH)'; \
 	} else { \
 	    Write-Host 'AI model already exists: $(QWEN_MODEL_PATH)'; \
