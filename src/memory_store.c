@@ -1,10 +1,15 @@
 #include "../include/memory_store.h"
+#include "../include/dpapi_crypt.h"
 #include "../include/logger.h"
 #include <windows.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
+
+/* Encryption header: 4-byte magic identifying DPAPI-encrypted blobs */
+static const BYTE ENC_MAGIC[4] = { 0x57, 0x49, 0x4E, 0x45 }; /* "WINE" */
+static bool s_encryption_enabled; /* default: off */
 
 #define MAX_PROFILE_KEYS 128
 #define MAX_CONV 1024
@@ -317,17 +322,50 @@ static void ensure_dir(const char *dir) {
         winalp_log(WINALP_LOG_WARN, "memory_store: cannot create %s", dir);
 }
 
-static void load_profile(void) {
-    char path[1024]; snprintf(path, sizeof(path), "%s\\profile.json", s_base);
-    FILE *f = fopen(path, "r");
-    if (!f) return;
+static int read_file_raw(const char *path, char **out_buf) {
+    *out_buf = NULL;
+    FILE *f = fopen(path, "rb");
+    if (!f) return 0;
     fseek(f, 0, SEEK_END); long sz = ftell(f); rewind(f);
     char *buf = (char*)malloc((size_t)sz + 1);
-    if (!buf) { fclose(f); return; }
-    fread(buf, 1, (size_t)sz, f); buf[sz] = '\0'; fclose(f);
+    if (!buf) { fclose(f); return 0; }
+    size_t n = fread(buf, 1, (size_t)sz, f);
+    fclose(f);
+    buf[n] = '\0';
+    *out_buf = buf;
+    return (int)n;
+}
+
+static void load_profile(void) {
+    char path[1024]; snprintf(path, sizeof(path), "%s\\profile.json", s_base);
+    char *raw = NULL;
+    int nread = read_file_raw(path, &raw);
+    if (!raw || nread <= 0) { free(raw); return; }
+
+    char *json_buf = NULL;
+    if (nread >= 4 && memcmp(raw, ENC_MAGIC, 4) == 0) {
+        /* Encrypted — decrypt */
+        BYTE *blob = (BYTE*)(raw + 4);
+        DWORD blob_len = (DWORD)(nread - 4);
+        DWORD dec_len = 0;
+        char *dec = NULL;
+        if (dpapi_decrypt(blob, blob_len, &dec, &dec_len)) {
+            json_buf = (char*)malloc((size_t)dec_len + 1);
+            if (json_buf) {
+                memcpy(json_buf, dec, dec_len);
+                json_buf[dec_len] = '\0';
+            }
+            dpapi_free((BYTE*)dec);
+        }
+        free(raw);
+    } else {
+        json_buf = raw; /* plain text */
+    }
+
+    if (!json_buf) return;
 
     /* minimal JSON object parser: find "key":"value" pairs */
-    char *p = buf;
+    char *p = json_buf;
     while ((p = strstr(p, "\"")) && s_nprofile < MAX_PROFILE_KEYS) {
         p++;
         int ki = 0;
@@ -346,19 +384,61 @@ static void load_profile(void) {
             s_nprofile++;
         }
     }
-    free(buf);
+    free(json_buf);
 }
 
 static void save_profile(void) {
     char path[1024]; snprintf(path, sizeof(path), "%s\\profile.json", s_base);
-    FILE *f = fopen(path, "w");
-    if (!f) return;
-    fputs("{\n", f);
+
+    /* Build JSON in memory buffer */
+    char buf[65536];
+    int pos = 0;
+    int rem = sizeof(buf);
+
+#define APPEND(fmt, ...) do { \
+    int n = snprintf(buf + pos, (size_t)rem, fmt, ##__VA_ARGS__); \
+    if (n < 0 || n >= rem) { pos = 0; rem = 0; } \
+    else { pos += n; rem -= n; } \
+} while(0)
+
+    APPEND("{\n");
     for (int i = 0; i < s_nprofile; i++) {
-        fprintf(f, "  \"%s\": \"%s\"%s\n",
-                s_profile[i].key, s_profile[i].val,
-                (i < s_nprofile - 1) ? "," : "");
+        APPEND("  \"%s\": \"%s\"%s\n",
+               s_profile[i].key, s_profile[i].val,
+               (i < s_nprofile - 1) ? "," : "");
     }
-    fputs("}\n", f);
-    fclose(f);
+    APPEND("}\n");
+    if (pos == 0) return;
+
+    if (s_encryption_enabled) {
+        /* Encrypt with DPAPI */
+        BYTE *blob = NULL;
+        DWORD blob_len = 0;
+        if (!dpapi_encrypt(buf, (size_t)pos, &blob, &blob_len)) {
+            winalp_log(WINALP_LOG_WARN, "memory_store: DPAPI encrypt failed");
+            return;
+        }
+        /* Write magic header + encrypted blob */
+        FILE *f = fopen(path, "wb");
+        if (!f) { dpapi_free(blob); return; }
+        fwrite(ENC_MAGIC, 1, 4, f);
+        fwrite(blob, 1, (size_t)blob_len, f);
+        fclose(f);
+        dpapi_free(blob);
+    } else {
+        /* Write plaintext */
+        FILE *f = fopen(path, "w");
+        if (!f) return;
+        fputs(buf, f);
+        fclose(f);
+    }
+
+#undef APPEND
+}
+
+void memory_store_set_encryption(bool enable) {
+    s_encryption_enabled = enable;
+    if (s_init) save_profile();
+    winalp_log(WINALP_LOG_INFO, "memory_store: encryption %s",
+               enable ? "enabled" : "disabled");
 }

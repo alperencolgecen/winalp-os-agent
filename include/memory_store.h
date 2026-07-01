@@ -25,4 +25,7 @@ bool memory_store_update_task(const char *task_id,
 /* Integrity check on startup */
 bool memory_store_integrity_check(void);
 
+/* DPAPI encryption toggle (default off) */
+void memory_store_set_encryption(bool enable);
+
 #endif /* MEMORY_STORE_H */
