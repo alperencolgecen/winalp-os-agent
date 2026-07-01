@@ -15,6 +15,9 @@ bool plugin_manager_deactivate(const char *name);
 /* Build guide string listing all active plugins + their actions (caller frees) */
 char *plugin_manager_build_guide(void);
 
+/* Sandbox: check if action is allowed (not blacklisted) */
+bool plugin_manager_is_action_allowed(const char *action);
+
 void plugin_manager_shutdown(void);
 
 #endif /* PLUGIN_MANAGER_H */

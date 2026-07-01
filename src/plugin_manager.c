@@ -1,5 +1,6 @@
 #include "../include/plugin_manager.h"
 #include "../include/logger.h"
+#include "../include/memory_store.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -8,6 +9,14 @@
 #define MAX_PLUGINS 64
 #define MAX_PATH_LEN 1024
 
+/* Blacklisted function name fragments */
+static const char *s_blacklist[] = {
+    "CreateProcess", "system", "popen", "exec", "fork",
+    "DeleteFile", "RemoveDirectory", "CreateFile",
+    "RegOpenKey", "RegSetValue", "socket", "connect",
+    NULL
+};
+
 typedef struct {
     char name[128];
     char version[32];
@@ -15,6 +24,7 @@ typedef struct {
     char desc[512];
     char entry[256];
     char actions[1024];
+    char data_dir[MAX_PATH_LEN]; /* sandboxed data directory */
     bool active;
     char dir[MAX_PATH_LEN];
 } Plugin;
@@ -23,9 +33,39 @@ static char s_dir[MAX_PATH_LEN];
 static Plugin s_plugins[MAX_PLUGINS];
 static int s_n;
 
+/* Blacklist check */
+static bool is_blacklisted(const char *func_name) {
+    if (!func_name) return true;
+    for (int i = 0; s_blacklist[i]; i++) {
+        if (strstr(func_name, s_blacklist[i])) return true;
+    }
+    return false;
+}
+
+/* Ensure sandbox data dir exists */
+static bool ensure_sandbox_dir(const char *plugin_name) {
+    char data_dir[MAX_PATH_LEN];
+    snprintf(data_dir, sizeof(data_dir), "profile/plugins/%s", plugin_name);
+
+    char tmp[MAX_PATH_LEN];
+    snprintf(tmp, sizeof(tmp), "profile\\plugins"); CreateDirectoryA(tmp, NULL);
+    snprintf(tmp, sizeof(tmp), "%s", data_dir);
+    for (char *p = tmp; *p; p++) if (*p == '/') *p = '\\';
+    CreateDirectoryA(tmp, NULL);
+
+    snprintf(tmp, sizeof(tmp), "%s\\data", data_dir);
+    for (char *p = tmp; *p; p++) if (*p == '/') *p = '\\';
+    CreateDirectoryA(tmp, NULL);
+
+    return true;
+}
+
 bool plugin_manager_init(const char *plugins_dir) {
     if (!plugins_dir) return false;
     strncpy(s_dir, plugins_dir, sizeof(s_dir) - 1);
+
+    /* Ensure plugins/ root dir exists */
+    CreateDirectoryA(s_dir, NULL);
     return true;
 }
 
@@ -58,8 +98,6 @@ int plugin_manager_scan(void) {
         buf[nr] = '\0'; fclose(f);
 
         /* Minimal JSON field extraction */
-        char tmp[1024];
-        /* name */
         const char *nstart = strstr(buf, "\"name\"");
         if (nstart) {
             nstart = strchr(nstart + 6, '"');
@@ -71,7 +109,6 @@ int plugin_manager_scan(void) {
                 p->name[i] = '\0';
             }
         }
-        /* desc */
         nstart = strstr(buf, "\"description\"");
         if (nstart) {
             nstart = strchr(nstart + 12, '"');
@@ -83,7 +120,6 @@ int plugin_manager_scan(void) {
                 p->desc[i] = '\0';
             }
         }
-        /* actions */
         nstart = strstr(buf, "\"actions\"");
         if (nstart) {
             nstart = strchr(nstart + 8, '[');
@@ -98,6 +134,26 @@ int plugin_manager_scan(void) {
 
         p->active = false;
         snprintf(p->entry, sizeof(p->entry), "%s\\%s\\main.lua", s_dir, fd.cFileName);
+        snprintf(p->data_dir, sizeof(p->data_dir), "profile/plugins/%s/data", p->name);
+
+        /* Verify actions against blacklist */
+        if (p->actions[0]) {
+            char actions_copy[1024];
+            strncpy(actions_copy, p->actions, sizeof(actions_copy) - 1);
+            char *tok = strtok(actions_copy, " ,\"\n\r\t");
+            while (tok) {
+                if (is_blacklisted(tok)) {
+                    winalp_log(WINALP_LOG_WARN,
+                               "plugin_manager: blacklisted action '%s' in %s — skipping",
+                               tok, fd.cFileName);
+                    memset(p, 0, sizeof(Plugin));
+                    break;
+                }
+                tok = strtok(NULL, " ,\"\n\r\t");
+            }
+            if (!p->name[0]) continue; /* skip invalid plugin */
+        }
+
         s_n++;
     } while (FindNextFile(h, &fd));
     FindClose(h);
@@ -110,8 +166,10 @@ bool plugin_manager_activate(const char *name) {
     if (!name) return false;
     for (int i = 0; i < s_n; i++) {
         if (strcmp(s_plugins[i].name, name) == 0) {
+            ensure_sandbox_dir(s_plugins[i].name);
             s_plugins[i].active = true;
-            winalp_log(WINALP_LOG_INFO, "plugin_manager: activated: %s", name);
+            winalp_log(WINALP_LOG_INFO, "plugin_manager: activated: %s (sandbox: %s)",
+                       name, s_plugins[i].data_dir);
             return true;
         }
     }
@@ -128,6 +186,10 @@ bool plugin_manager_deactivate(const char *name) {
         }
     }
     return false;
+}
+
+bool plugin_manager_is_action_allowed(const char *action) {
+    return !is_blacklisted(action);
 }
 
 char *plugin_manager_build_guide(void) {
