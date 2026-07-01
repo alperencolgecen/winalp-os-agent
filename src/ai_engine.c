@@ -14,6 +14,10 @@ static int s_n_ctx = 0;
 #define MAX_SYS_PROMPT 16384
 static char s_system_prompt[MAX_SYS_PROMPT] = "";
 
+/* Dynamic context (active window, screen OCR) — updated from main loop */
+#define MAX_DYN_CTX 2048
+static char s_dynamic_context[MAX_DYN_CTX] = "";
+
 /* Sliding window conversation buffer */
 #define MAX_HISTORY 64
 #define MAX_HIST_LEN 4096
@@ -28,6 +32,10 @@ bool ai_engine_is_loaded(void) {
 
 void ai_engine_set_system_prompt(const char *prompt) {
     strncpy(s_system_prompt, prompt ? prompt : "", sizeof(s_system_prompt) - 1);
+}
+
+void ai_engine_set_dynamic_context(const char *ctx) {
+    strncpy(s_dynamic_context, ctx ? ctx : "", sizeof(s_dynamic_context) - 1);
 }
 
 /* Sliding window: trim memory when >70% full */
@@ -150,6 +158,9 @@ void ai_engine_infer(const char *prompt, TokenCallback cb, void *userdata) {
 
     if (s_system_prompt[0])
         CP_APPEND("%s\n\n", s_system_prompt);
+
+    if (s_dynamic_context[0])
+        CP_APPEND("[Live Context]\n%s\n\n", s_dynamic_context);
 
     /* Replay history (except the just-pushed user message which is included after) */
     int n_hist = s_history_count - 1;

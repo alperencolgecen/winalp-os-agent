@@ -169,6 +169,18 @@ int main(void) {
                 }
             }
             ui_render_set_context_label(ctx);
+
+            /* Feed dynamic context to AI engine so it knows the user's active environment */
+            {
+                char dyn_ctx[2048];
+                snprintf(dyn_ctx, sizeof(dyn_ctx), "Active Window: %s", ctx);
+                if (vision_buf[0]) {
+                    size_t cur = strlen(dyn_ctx);
+                    snprintf(dyn_ctx + cur, sizeof(dyn_ctx) - cur,
+                             "\nScreen OCR: %s", vision_buf);
+                }
+                ai_engine_set_dynamic_context(dyn_ctx);
+            }
         }
 
         /* Profile label every 120 frames */
