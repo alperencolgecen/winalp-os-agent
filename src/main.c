@@ -20,8 +20,8 @@
 
 static bool confirm_cb(const char *desc, void *ud) {
     (void)ud;
-    winalp_log(WINALP_LOG_INFO, "agent: confirming: %s", desc);
-    return true;
+    winalp_log(WINALP_LOG_INFO, "agent: confirm: %s", desc);
+    return ui_render_confirm_blocking("WinAlp — Confirm Action", desc);
 }
 
 int main(void) {

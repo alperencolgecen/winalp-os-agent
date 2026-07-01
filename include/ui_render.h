@@ -20,6 +20,9 @@ typedef struct {
 /* Model selection screen — returns strdup'd path or NULL on exit */
 char *ui_render_model_select(ModelEntry *models, int n_models);
 
+/* Blocking confirmation overlay — returns true (Yes) or false (No) */
+bool ui_render_confirm_blocking(const char *title, const char *msg);
+
 void ui_render_init(int width, int height, const char *title);
 void ui_render_frame(AgentState state, float amplitude);
 void ui_render_push_chat(const char *role, const char *text, const char *source_icon);

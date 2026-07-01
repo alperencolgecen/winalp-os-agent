@@ -195,6 +195,23 @@ bool ui_render_show_overlay(const char *title, const char *msg) {
     return s_overlay_result;
 }
 
+/* Blocking version — pumps raylib event loop until user answers */
+static void ui_draw_overlay(void);
+bool ui_render_confirm_blocking(const char *title, const char *msg) {
+    s_overlay_active = true;
+    strncpy(s_overlay_title, title ? title : "Confirm", sizeof(s_overlay_title) - 1);
+    strncpy(s_overlay_msg, msg ? msg : "", sizeof(s_overlay_msg) - 1);
+    s_overlay_result = false;
+
+    while (s_overlay_active && !WindowShouldClose()) {
+        BeginDrawing();
+        ClearBackground((Color){ 8, 12, 20, 255 });
+        ui_draw_overlay();
+        EndDrawing();
+    }
+    return s_overlay_result;
+}
+
 static void ui_draw_overlay(void) {
     if (!s_overlay_active) return;
 

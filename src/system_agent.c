@@ -1,4 +1,5 @@
 #include "../include/system_agent.h"
+#include "../include/memory_store.h"
 #include "../include/logger.h"
 #include <windows.h>
 #include <stdio.h>
@@ -230,6 +231,7 @@ static void exec_action(const char *json) {
         else winalp_log(WINALP_LOG_ERROR, "agent: rmdir failed %s", full);
 
     } else if (strcmp(action, "update_profile") == 0) {
+        memory_store_set_profile(path, content);
         winalp_log(WINALP_LOG_INFO, "agent: profile update: %s = %s", path, content);
 
     } else if (s_plugin_cb && s_plugin_cb(action, path, content, s_plugin_ud)) {
