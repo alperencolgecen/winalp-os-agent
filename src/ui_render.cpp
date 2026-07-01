@@ -24,6 +24,9 @@ static int s_height = 720;
 static char s_contextLabel[256] = "";
 static char s_profileLabel[512] = "";
 
+/* Theme values (loaded from scripts/ui_theme.lua) */
+static struct { float orb_speed; float orb_scale; float max_particles; } s_theme = {0};
+
 static bool s_shouldClose = false;
 
 static char s_chatBuffer[MAX_CHAT_LINES][MAX_CHAT_LINE_LEN];
@@ -442,7 +445,13 @@ static void ui_draw_top_strip(void) {
 }
 
 void ui_render_set_task_strip(const char *tasks) {
-    strncpy(s_task_strip, tasks ? tasks : "", sizeof(s_task_strip) - 1);
+    strncpy(s_task_strip, tasks, sizeof(s_task_strip) - 1);
+}
+
+void ui_render_set_theme_float(const char *key, float value) {
+    if (strcmp(key, "orb_speed") == 0) s_theme.orb_speed = value;
+    else if (strcmp(key, "orb_scale") == 0) s_theme.orb_scale = value;
+    else if (strcmp(key, "max_particles") == 0) s_theme.max_particles = value;
 }
 
 static void ui_draw_left_panel(void) {

@@ -36,6 +36,7 @@ void ui_render_push_chat(const char *role, const char *text, const char *source_
 void ui_render_set_context_label(const char *label);
 void ui_render_set_profile_label(const char *label);
 void ui_render_set_task_strip(const char *tasks);
+void ui_render_set_theme_float(const char *key, float value);
 bool ui_render_should_close(void);
 void ui_render_shutdown(void);
 

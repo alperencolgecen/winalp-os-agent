@@ -15,6 +15,7 @@
 #include "../include/context_tracker.h"
 #include "../include/prompt_engine.h"
 #include "../include/plugin_manager.h"
+#include "../include/lua_runtime.h"
 #include "../include/thread_pool.h"
 #include "../include/vision_engine.h"
 #include "../include/sys_diag.h"
@@ -152,6 +153,21 @@ int main(void) {
     bool mic_ok = audio_capture_start();
     if (!mic_ok)
         winalp_log(WINALP_LOG_WARN, "Mic unavailable");
+
+    /* Load UI theme from Lua if available */
+    {
+        lua_State *L_theme = lua_runtime_new_state("scripts");
+        if (L_theme && lua_runtime_dofile(L_theme, "scripts/ui_theme.lua")) {
+            const char *speed_str = lua_runtime_dostring_result(L_theme, "return theme.orb_speed");
+            const char *scale_str = lua_runtime_dostring_result(L_theme, "return theme.orb_scale");
+            const char *maxp_str  = lua_runtime_dostring_result(L_theme, "return theme.max_particles");
+            if (speed_str) ui_render_set_theme_float("orb_speed", (float)atof(speed_str));
+            if (scale_str) ui_render_set_theme_float("orb_scale", (float)atof(scale_str));
+            if (maxp_str)  ui_render_set_theme_float("max_particles", (float)atof(maxp_str));
+            winalp_log(WINALP_LOG_INFO, "theme: loaded scripts/ui_theme.lua");
+        }
+        if (L_theme) lua_runtime_close(L_theme);
+    }
 
     /* Initialise document router (PDF/OCR/VLM) */
     doc_router_init("models");
