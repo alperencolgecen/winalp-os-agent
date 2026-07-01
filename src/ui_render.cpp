@@ -44,6 +44,40 @@ static AgentState s_lastState = AGENT_STATE_LISTENING;
 static float s_colorLerp[4] = {0, 212, 255, 255};
 static float s_colorTarget[4] = {0, 212, 255, 255};
 static Font s_font;
+static bool s_font_loaded = false;
+
+/* Turkish character codepoints (UTF-16) */
+#define FONT_CP_CNT (256 + 12)
+static int s_font_cps[FONT_CP_CNT];
+static bool s_font_cps_built = false;
+
+static void build_font_cps(void) {
+    if (s_font_cps_built) return;
+    int idx = 0;
+    for (int i = 32; i < 32 + 256; i++) s_font_cps[idx++] = i;
+    s_font_cps[idx++] = 0x00C7; s_font_cps[idx++] = 0x00E7;
+    s_font_cps[idx++] = 0x011E; s_font_cps[idx++] = 0x011F;
+    s_font_cps[idx++] = 0x0130; s_font_cps[idx++] = 0x0131;
+    s_font_cps[idx++] = 0x00D6; s_font_cps[idx++] = 0x00F6;
+    s_font_cps[idx++] = 0x015E; s_font_cps[idx++] = 0x015F;
+    s_font_cps[idx++] = 0x00DC; s_font_cps[idx++] = 0x00FC;
+    s_font_cps_built = true;
+}
+
+static void load_ui_font(void) {
+    build_font_cps();
+    const char *paths[] = {
+        "C:/Windows/Fonts/segoeui.ttf",
+        "C:/Windows/Fonts/arial.ttf",
+        "C:/Windows/Fonts/tahoma.ttf",
+    };
+    for (int i = 0; i < 3; i++) {
+        Font f = LoadFontEx(paths[i], 14, s_font_cps, FONT_CP_CNT);
+        if (f.glyphCount > 0) { s_font = f; s_font_loaded = true; return; }
+    }
+    s_font = GetFontDefault();
+    s_font_loaded = false;
+}
 
 static void state_color_rgba(AgentState state, float out[4]) {
     switch (state) {
@@ -577,7 +611,7 @@ void ui_render_init(int width, int height, const char *title) {
     InitWindow(width, height, title);
     SetTargetFPS(WINALP_TARGET_FPS);
 
-    s_font = GetFontDefault();
+    load_ui_font();
 
     Image iconImg = LoadImage("assets/WinAlp.png");
     if (iconImg.data != NULL) {
@@ -622,6 +656,7 @@ bool ui_render_should_close(void) {
 }
 
 void ui_render_shutdown(void) {
+    if (s_font_loaded) UnloadFont(s_font);
     CloseWindow();
 }
 
