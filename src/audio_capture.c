@@ -28,6 +28,10 @@ static void capture_cb(ma_device *dev, void *out, const void *in, ma_uint32 fram
     LeaveCriticalSection(&s_lock);
 }
 
+bool audio_capture_is_initialised(void) {
+    return s_running;
+}
+
 bool audio_capture_start(void) {
     if (s_running) return true;
 
