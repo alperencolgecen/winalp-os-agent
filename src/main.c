@@ -106,6 +106,21 @@ int main(void) {
     while (!ui_render_should_close()) {
         float amplitude = mic_ok ? audio_capture_rms() : 0.5f;
 
+        /* Poll for keyboard text input — send to background AI thread */
+        {
+            char kb_input[4096];
+            if (ui_render_has_text_input()) {
+                ui_render_get_text_input(kb_input, sizeof(kb_input));
+                if (kb_input[0]) {
+                    winalp_log(WINALP_LOG_INFO, "main: keyboard input (%d chars)", (int)strlen(kb_input));
+                    ui_render_push_chat("user", kb_input, "[key]");
+                    memory_store_append_message("user", "key", kb_input);
+                    waiting_for_ai = true;
+                    thread_pool_send_text(kb_input);
+                }
+            }
+        }
+
         /* Poll for STT transcripts from the background STT thread */
         char transcript[4096];
         if (thread_pool_get_transcript(transcript, sizeof(transcript))) {

@@ -183,6 +183,11 @@ static DWORD WINAPI memory_thread(LPVOID arg) {
 }
 
 /* ---------- public API ---------- */
+void thread_pool_send_text(const char *text) {
+    if (text && text[0])
+        queue_push(&s_transcript_q, text);
+}
+
 bool thread_pool_start_all(void) {
     s_running = true;
     s_nthreads = 0;

@@ -23,6 +23,10 @@ char *ui_render_model_select(ModelEntry *models, int n_models);
 /* Blocking confirmation overlay — returns true (Yes) or false (No) */
 bool ui_render_confirm_blocking(const char *title, const char *msg);
 
+/* Keyboard text input — poll in main loop */
+bool ui_render_has_text_input(void);
+void ui_render_get_text_input(char *out, int out_len);
+
 void ui_render_init(int width, int height, const char *title);
 void ui_render_frame(AgentState state, float amplitude);
 void ui_render_push_chat(const char *role, const char *text, const char *source_icon);

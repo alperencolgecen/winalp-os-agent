@@ -39,6 +39,10 @@ static bool  s_overlay_result;
 /* Task strip data */
 static char s_task_strip[1024] = "";
 
+/* Text input */
+static char s_input_buf[512] = "";
+static bool s_input_pending;
+
 /* 3D orb */
 static Camera3D s_orbCamera = { 0 };
 static float s_orbTime = 0.0f;
@@ -374,8 +378,9 @@ static void ui_draw_right_panel(void) {
 }
 
 static void ui_draw_bottom_chat(void) {
-    ImGui::SetNextWindowPos(ImVec2(200, (float)s_height - 200), ImGuiCond_Always);
-    ImGui::SetNextWindowSize(ImVec2((float)s_width - 400, 200), ImGuiCond_Always);
+    float chatH = 240;
+    ImGui::SetNextWindowPos(ImVec2(200, (float)s_height - chatH), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2((float)s_width - 400, chatH), ImGuiCond_Always);
     ImGui::SetNextWindowBgAlpha(0.30f);
     ImGui::Begin("##chat", NULL,
         ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
@@ -386,7 +391,8 @@ static void ui_draw_bottom_chat(void) {
     s_chatFilter.Draw("Filter", 180);
 
     ImGui::Separator();
-    ImGui::BeginChild("##chatscroll", ImVec2(0, 0), false, ImGuiWindowFlags_NoNavFocus);
+    ImGui::BeginChild("##chatscroll", ImVec2(0, -ImGui::GetFrameHeightWithSpacing() - 4),
+                      false, ImGuiWindowFlags_NoNavFocus);
     if (s_chatCount > 0) {
         int start = (s_chatCount < MAX_CHAT_LINES) ? 0 : s_chatHead;
         int count = (s_chatCount < MAX_CHAT_LINES) ? s_chatCount : MAX_CHAT_LINES;
@@ -403,7 +409,29 @@ static void ui_draw_bottom_chat(void) {
         ImGui::TextDisabled("No messages yet.");
     }
     ImGui::EndChild();
+
+    /* Text input bar */
+    ImGui::PushItemWidth(-1.0f);
+    if (ImGui::InputText("##input", s_input_buf, sizeof(s_input_buf),
+                         ImGuiInputTextFlags_EnterReturnsTrue)) {
+        s_input_pending = true;
+    }
+    ImGui::PopItemWidth();
     ImGui::End();
+}
+
+void ui_render_get_text_input(char *out, int out_len) {
+    if (out && out_len > 0) out[0] = '\0';
+    if (s_input_pending && s_input_buf[0]) {
+        strncpy(out, s_input_buf, (size_t)out_len - 1);
+        out[out_len - 1] = '\0';
+        s_input_buf[0] = '\0';
+        s_input_pending = false;
+    }
+}
+
+bool ui_render_has_text_input(void) {
+    return s_input_pending && s_input_buf[0];
 }
 
 void ui_render_init(int width, int height, const char *title) {
