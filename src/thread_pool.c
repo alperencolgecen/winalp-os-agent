@@ -70,28 +70,95 @@ static void on_stt_result(const char *text, void *ud) {
         queue_push(&s_transcript_q, text);
 }
 
+/* VAD state machine */
+#define VAD_THRESHOLD_ON  0.45f   /* speech start threshold */
+#define VAD_THRESHOLD_OFF 0.25f   /* speech end threshold (hysteresis) */
+#define VAD_SILENCE_MS    800     /* ms of silence before declaring speech ended */
+#define VAD_MIN_SPEECH_MS 300     /* minimum speech duration to trigger STT */
+#define VAD_MAX_SPEECH_MS 8000    /* max speech capture before forced STT */
+#define VAD_SAMPLE_RATE   16000
+
 static DWORD WINAPI stt_thread(LPVOID arg) {
     (void)arg;
     winalp_log(WINALP_LOG_INFO, "thread_pool: STT thread started");
 
+    int vad_state = 0; /* 0=silence, 1=speech_candidate, 2=speaking */
+    int silence_ms = 0;
+    int speech_ms = 0;
+
     while (s_running) {
         if (!audio_capture_is_initialised()) {
-            Sleep(100);
+            Sleep(50);
             continue;
         }
-        float amplitude = audio_capture_rms();
-        if (amplitude > 0.60f) {
-            /* Voice detected — wait for speech to end, then transcribe */
-            Sleep(1500);
-            if (!s_running) break;
 
-            float pcm[16000 * 2];
-            int n = audio_capture_read(pcm, 16000 * 2);
-            if (n > 0 && stt_engine_is_loaded()) {
-                stt_engine_process(pcm, n, on_stt_result, NULL);
-            }
-        } else {
-            Sleep(50);
+        float amplitude = audio_capture_rms();
+
+        switch (vad_state) {
+            case 0: /* Silence — waiting for speech */
+                if (amplitude > VAD_THRESHOLD_ON) {
+                    vad_state = 1; /* speech candidate */
+                    speech_ms = 0;
+                }
+                Sleep(50);
+                break;
+
+            case 1: /* Speech candidate — confirm sustained speech */
+                speech_ms += 50;
+                if (amplitude > VAD_THRESHOLD_ON) {
+                    if (speech_ms >= VAD_MIN_SPEECH_MS) {
+                        vad_state = 2; /* confirmed speaking */
+                        silence_ms = 0;
+                        winalp_log(WINALP_LOG_INFO, "thread_pool: VAD: speech started");
+                    }
+                } else {
+                    /* False alarm — amplitude dropped back */
+                    if (speech_ms > 200) {
+                        /* Brief sound detected but too short — not worth transcribing */
+                    }
+                    vad_state = 0;
+                }
+                Sleep(50);
+                break;
+
+            case 2: /* Speaking — capturing until silence or max time */
+                speech_ms += 50;
+                if (amplitude > VAD_THRESHOLD_OFF) {
+                    silence_ms = 0;
+                } else {
+                    silence_ms += 50;
+                }
+
+                /* End capture on: enough silence OR max speech time */
+                if (silence_ms >= VAD_SILENCE_MS || speech_ms >= VAD_MAX_SPEECH_MS) {
+                    if (!s_running) break;
+                    winalp_log(WINALP_LOG_INFO,
+                               "thread_pool: VAD: speech ended (%d ms, %d ms silence)",
+                               speech_ms, silence_ms);
+
+                    /* Capture the full speech segment */
+                    int capture_len = (speech_ms * VAD_SAMPLE_RATE) / 1000;
+                    if (capture_len < 1600) capture_len = 1600; /* min 0.1s */
+                    if (capture_len > VAD_SAMPLE_RATE * 8) capture_len = VAD_SAMPLE_RATE * 8;
+
+                    float *pcm = (float*)malloc((size_t)capture_len * sizeof(float));
+                    if (pcm) {
+                        int n = audio_capture_read(pcm, capture_len);
+                        if (n > 0 && stt_engine_is_loaded()) {
+                            winalp_log(WINALP_LOG_INFO,
+                                       "thread_pool: STT processing %d samples", n);
+                            stt_engine_process(pcm, n, on_stt_result, NULL);
+                        }
+                        free(pcm);
+                    }
+
+                    vad_state = 0;
+                    speech_ms = 0;
+                    silence_ms = 0;
+                } else {
+                    Sleep(50);
+                }
+                break;
         }
     }
     winalp_log(WINALP_LOG_INFO, "thread_pool: STT thread stopped");
