@@ -106,7 +106,7 @@ int main(void) {
 
     bool ai_ok = false;
     if (selected_model[0]) {
-        ai_ok = ai_engine_load(selected_model, 0);
+        ai_ok = ai_engine_load_auto(selected_model);
         if (ai_ok)
             winalp_log(WINALP_LOG_INFO, "AI engine ready: %s", selected_model);
         else

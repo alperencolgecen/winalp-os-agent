@@ -93,6 +93,15 @@ bool sys_diag_detect(SysDiag *d) {
     return true;
 }
 
+int sys_diag_recommend_gpu_layers(int total_layers, unsigned long long free_vram_mb) {
+    if (total_layers <= 0) return 0;
+    if (free_vram_mb >= 2048) return total_layers; /* all layers fit */
+    if (free_vram_mb < 256)  return 0;             /* none */
+    /* Estimate: each Q4_K_M layer ~15 MB VRAM */
+    int layers = (int)(free_vram_mb / 15);
+    return layers > total_layers ? total_layers : layers;
+}
+
 void sys_diag_print(const SysDiag *d) {
     if (!d) return;
     winalp_log(WINALP_LOG_INFO, "CPU: %s (%d cores/%d threads)",

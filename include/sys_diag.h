@@ -18,4 +18,7 @@ typedef struct {
 bool sys_diag_detect(SysDiag *d);
 void sys_diag_print(const SysDiag *d);
 
+/* Recommend n_gpu_layers based on free VRAM and total model layers */
+int  sys_diag_recommend_gpu_layers(int total_layers, unsigned long long free_vram_mb);
+
 #endif

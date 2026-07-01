@@ -1,5 +1,6 @@
 #include "../include/ai_engine.h"
 #include "../include/llama.h"
+#include "../include/sys_diag.h"
 #include "../include/logger.h"
 #include <string.h>
 #include <stdlib.h>
@@ -92,6 +93,33 @@ bool ai_engine_load(const char *model_path, int n_gpu_layers) {
 
     winalp_log(WINALP_LOG_INFO, "AI: engine ready (ctx=%d)", s_n_ctx);
     return true;
+}
+
+/* Load model with auto-detected GPU offload based on free VRAM */
+bool ai_engine_load_auto(const char *model_path) {
+    if (!model_path) return false;
+
+    /* Phase 1: load with 0 GPU layers to count total layers */
+    struct llama_model_params probe = llama_model_default_params();
+    probe.n_gpu_layers = 0;
+    struct llama_model *tmp = llama_model_load_from_file(model_path, probe);
+    if (!tmp) {
+        winalp_log(WINALP_LOG_ERROR, "AI: failed to probe model: %s", model_path);
+        return false;
+    }
+    int n_total = (int)llama_model_n_layer(tmp);
+    winalp_log(WINALP_LOG_INFO, "AI: model has %d layers total", n_total);
+    llama_model_free(tmp);
+
+    /* Phase 2: detect system VRAM and calculate offload */
+    SysDiag d;
+    sys_diag_detect(&d);
+    int gpu_layers = sys_diag_recommend_gpu_layers(n_total, d.vram_free_mb);
+    winalp_log(WINALP_LOG_INFO, "AI: auto GPU layers = %d (VRAM free=%llu MB, total=%llu MB)",
+               gpu_layers, d.vram_free_mb, d.vram_total_mb);
+
+    /* Phase 3: load model with calculated layers */
+    return ai_engine_load(model_path, gpu_layers);
 }
 
 void ai_engine_infer(const char *prompt, TokenCallback cb, void *userdata) {
