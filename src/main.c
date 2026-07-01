@@ -29,15 +29,23 @@ static float s_pcm_buf[MAX_PCM_SAMPLES];
 static int s_pcm_count = 0;
 
 static void on_stt_result(const char *text, void *ud);
+static void on_partial_stt(const char *text, void *ud);
 
-struct SttJob { float *buf; int count; };
+struct SttJob { float *buf; int count; int partial; };
 
 static DWORD WINAPI stt_thread_proc(LPVOID arg) {
     struct SttJob *job = (struct SttJob*)arg;
-    if (job && job->buf && job->count > 0)
-        stt_engine_process(job->buf, job->count, on_stt_result, NULL);
+    if (job && job->buf && job->count > 0) {
+        TranscriptCallback cb = job->partial ? on_partial_stt : on_stt_result;
+        stt_engine_process(job->buf, job->count, cb, NULL);
+    }
     if (job) { free(job->buf); free(job); }
     return 0;
+}
+
+static void on_partial_stt(const char *text, void *ud) {
+    (void)ud;
+    if (text && text[0]) ui_render_set_transcript(text);
 }
 
 static void on_stt_result(const char *text, void *ud) {
@@ -227,6 +235,7 @@ int main(void) {
     int ctx_counter = 0;
 
     bool was_octagon_held = false;
+    clock_t last_partial = 0;
 
     while (!ui_render_should_close()) {
         float amplitude = mic_ok ? audio_capture_rms() : 0.5f;
@@ -236,16 +245,34 @@ int main(void) {
             bool held = ui_render_is_octagon_held();
             if (held && !was_octagon_held) {
                 s_pcm_count = 0;
+                last_partial = clock();
                 audio_capture_set_exclusive(true);
-                if (stt_engine_is_loaded())
+                if (stt_engine_is_loaded()) {
                     winalp_log(WINALP_LOG_INFO, "main: push-to-talk started");
-                else
+                    ui_render_set_transcript("Listening...");
+                } else {
                     winalp_log(WINALP_LOG_WARN, "main: STT not loaded - cannot record");
+                }
             }
             if (held && stt_engine_is_loaded()) {
                 int n = audio_capture_read(s_pcm_buf + s_pcm_count,
                                            MAX_PCM_SAMPLES - s_pcm_count);
                 if (n > 0) s_pcm_count += n;
+                /* Partial transcript every ~1.5s */
+                double elapsed = (double)(clock() - last_partial) / CLOCKS_PER_SEC;
+                if (elapsed > 1.5 && s_pcm_count > 16000) {
+                    last_partial = clock();
+                    float *copy = (float*)malloc(s_pcm_count * sizeof(float));
+                    if (copy) {
+                        memcpy(copy, s_pcm_buf, s_pcm_count * sizeof(float));
+                        struct SttJob *job = (struct SttJob*)malloc(sizeof(struct SttJob));
+                        if (job) {
+                            job->buf = copy; job->count = s_pcm_count; job->partial = 1;
+                            HANDLE h = CreateThread(NULL, 0, stt_thread_proc, job, 0, NULL);
+                            if (h) CloseHandle(h); else { free(job->buf); free(job); }
+                        } else { free(copy); }
+                    }
+                }
             }
             if (!held && was_octagon_held) {
                 audio_capture_set_exclusive(false);
@@ -257,6 +284,7 @@ int main(void) {
                         if (job) {
                             job->buf = copy;
                             job->count = s_pcm_count;
+                            job->partial = 0;
                             HANDLE h = CreateThread(NULL, 0, stt_thread_proc, job, 0, NULL);
                             if (h) CloseHandle(h); else { free(job->buf); free(job); }
                         } else {

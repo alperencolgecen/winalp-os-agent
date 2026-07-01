@@ -409,13 +409,20 @@ static void draw_transcript(void) {
     strncpy(txt, (const char*)s_transcript, sizeof(txt) - 1);
     if (!txt[0]) return;
 
-    Vector2 sz = MeasureTextEx(s_font, txt, 20, 1);
+    bool listening = (strcmp(txt, "Listening...") == 0);
+    int pulse = listening ? (int)(80 + 60 * sinf(s_time * 4.0f)) : 220;
+    Color col = listening ? (Color){0, 243, 255, pulse} : (Color){0, 255, 100, 220};
+    int fs = listening ? 18 : 20;
+
+    Vector2 sz = MeasureTextEx(s_font, txt, fs, 1);
     int px = (s_width - (int)sz.x) / 2;
     int py = s_height - 80;
-    DrawRectangle(px - 10, py - 6, (int)sz.x + 20, (int)sz.y + 12,
+    int pad = 14;
+    DrawRectangle(px - pad, py - 6, (int)sz.x + pad * 2, (int)sz.y + 12,
                   (Color){0, 0, 0, 160});
-    DrawTextEx(s_font, txt, (Vector2){(float)px, (float)py}, 20, 1,
-               (Color){0, 255, 100, 220});
+    DrawRectangleLines(px - pad, py - 6, (int)sz.x + pad * 2, (int)sz.y + 12,
+                       alpha(col, 60));
+    DrawTextEx(s_font, txt, (Vector2){(float)px, (float)py}, fs, 1, col);
 }
 
 static void draw_overlay(void) {
