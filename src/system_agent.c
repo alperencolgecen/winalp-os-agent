@@ -21,21 +21,79 @@ void system_agent_set_confirm_cb(ConfirmCallback cb, void *ud) {
     s_confirm_ud = ud;
 }
 
-/* Minimal KV extractor: finds "key":" after key_name, copies value into out */
+/* JSON tokeniser states */
+enum { J_INIT, J_IN_KEY, J_IN_STR, J_IN_INT, J_DONE };
+
+/* Extract value for a given key from a JSON object, regex-free state machine */
 static int extract_str(const char *src, const char *key, char *out, int out_sz) {
-    char pattern[128];
-    snprintf(pattern, sizeof(pattern), "\"%s\" \":\" \"", key);
-    /* simpler approach: just search for "key": " */
-    char search[64];
-    int slen = snprintf(search, sizeof(search), "\"%s\":\"", key);
-    if (slen <= 0 || slen >= (int)sizeof(search)) return 0;
-    const char *p = strstr(src, search);
-    if (!p) return 0;
-    p += slen;
-    int i = 0;
-    while (*p && *p != '"' && i < out_sz - 1) { out[i++] = *p++; }
-    out[i] = '\0';
-    return i;
+    if (!src || !key) return 0;
+    out[0] = '\0';
+    int state = J_INIT, ki = 0;
+    char cur_key[64];
+    int  cur_key_len = 0;
+
+    for (const char *p = src; *p && state != J_DONE; p++) {
+        char c = *p;
+        switch (state) {
+        case J_INIT:
+            if (c == '{') state = J_IN_KEY, cur_key_len = 0;
+            break;
+        case J_IN_KEY:
+            if (c == '"' && (p == src || *(p-1) != '\\')) {
+                /* end of key string */
+                cur_key[cur_key_len] = '\0';
+                /* skip whitespace and colon */
+                p++;
+                while (*p && (*p == ' ' || *p == ':')) p++;
+                if (!*p) return 0;
+                if (*p == '"') { state = J_IN_STR; ki = 0; }
+                else if (*p == '{' || *p == '[') {
+                    /* skip nested object/array */
+                    int depth = 1; p++;
+                    while (*p && depth > 0) {
+                        if (*p == '{' || *p == '[') depth++;
+                        else if (*p == '}' || *p == ']') depth--;
+                        p++;
+                    }
+                    if (!*p) return 0;
+                    state = J_IN_KEY; cur_key_len = 0;
+                } else { state = J_IN_INT; ki = 0; }
+                /* check if this is our target key */
+                if (strcmp(cur_key, key) != 0) {
+                    /* skip value */
+                    if (state == J_IN_STR) {
+                        while (*p && !(*p == '"' && *(p-1) != '\\')) p++;
+                    } else if (state == J_IN_INT) {
+                        while (*p && *p != ',' && *p != '}' && *p != ' ') p++;
+                    }
+                    state = J_IN_KEY; cur_key_len = 0;
+                    if (*p) p--;
+                }
+                continue;
+            }
+            if (cur_key_len < (int)sizeof(cur_key) - 1)
+                cur_key[cur_key_len++] = c;
+            break;
+        case J_IN_STR:
+            if (c == '"' && (p == src || *(p-1) != '\\')) {
+                out[ki] = '\0';
+                state = J_DONE;
+            } else if (ki < out_sz - 1) {
+                out[ki++] = c;
+            }
+            break;
+        case J_IN_INT:
+            if (c == ',' || c == '}' || c == ' ') {
+                out[ki] = '\0';
+                state = J_DONE;
+            } else if (ki < out_sz - 1) {
+                out[ki++] = c;
+            }
+            break;
+        default: break;
+        }
+    }
+    return (int)strlen(out);
 }
 
 static const char *s_allowed_roots[] = {
