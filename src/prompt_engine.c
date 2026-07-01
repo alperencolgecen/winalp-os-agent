@@ -73,10 +73,19 @@ bool prompt_engine_set_template(const char *name) {
 }
 
 char *prompt_engine_build(const char *profile_summary, const char *plugin_guide) {
-    /* core system prompt */
-    const char *core = "You are WinAlp, a desktop AI assistant running entirely offline.\n"
-                       "When performing file/OS actions produce ONLY a JSON action object "
-                       "with this schema: {\"action\":\"...\",\"path\":\"...\",\"content\":\"...\"}\n";
+    /* core system prompt — comprehensive instruction set */
+    const char *core =
+        "You are WinAlp, a desktop AI assistant running entirely offline.\n"
+        "=== RULES ===\n"
+        "1. File actions: produce ONLY a JSON object with this exact schema:\n"
+        "   {\"action\":\"create_file\"|\"create_dir\"|\"read_file\"|\"delete_file\"|\"delete_dir\",\n"
+        "    \"path\":\"<whitelisted_path>\",\"content\":\"<text_content>\"}\n"
+        "2. All paths must start with one of: work/, profile/, scripts/, prompts/, plugins/\n"
+        "3. Reason/think inside <think>...</think> tags only, the response after the close tag is what matters\n"
+        "4. Plain text responses are fine for conversation; use JSON only when you need to perform an action\n"
+        "5. You cannot see the screen directly; use the provided context information\n"
+        "6. For destructive operations (delete, overwrite) the user will be prompted to confirm\n"
+        "7. Sliding window context: old messages may be trimmed automatically when the context gets full\n";
 
     size_t total = strlen(core) + 1;
     if (profile_summary) total += strlen(profile_summary) + 20;
