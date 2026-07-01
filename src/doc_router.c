@@ -2,6 +2,7 @@
 #include "../include/ocr_engine.h"
 #include "../include/vision_engine.h"
 #include "../include/ai_engine.h"
+#include "../include/vlm_engine.h"
 #include "../include/logger.h"
 #include <stdio.h>
 #include <string.h>
@@ -11,6 +12,24 @@
 static bool s_vlm_available;
 static char s_mmproj_path[1024];
 static char s_models_dir[1024];
+
+/* Callback context for collecting VLM token output */
+struct CollectCtx {
+    char *buf;
+    int pos;
+    int cap;
+};
+
+static void collect_cb(const char *token, void *userdata) {
+    struct CollectCtx *ctx = (struct CollectCtx*)userdata;
+    if (!ctx || !token) return;
+    int n = (int)strlen(token);
+    if (ctx->pos + n < ctx->cap - 1) {
+        memcpy(ctx->buf + ctx->pos, token, (size_t)n);
+        ctx->pos += n;
+        ctx->buf[ctx->pos] = '\0';
+    }
+}
 
 /* Forward: pdf_reader minimal text extraction (returns allocated string) */
 char *pdf_reader_extract_text(const char *pdf_path);
@@ -30,9 +49,19 @@ bool doc_router_init(const char *models_dir) {
         snprintf(s_mmproj_path, sizeof(s_mmproj_path), "%s\\%s", models_dir, fd.cFileName);
         s_vlm_available = true;
         FindClose(h);
-        winalp_log(WINALP_LOG_INFO, "doc_router: VLM available: %s", s_mmproj_path);
+        winalp_log(WINALP_LOG_INFO, "doc_router: VLM mmproj found: %s", s_mmproj_path);
+        /* Initialise VLM engine — will load mmproj via mtmd */
+        if (ai_engine_is_loaded() && ai_engine_is_vlm()) {
+            if (vlm_engine_init(s_mmproj_path)) {
+                winalp_log(WINALP_LOG_INFO, "doc_router: VLM engine ready");
+            } else {
+                winalp_log(WINALP_LOG_WARN, "doc_router: VLM engine init failed — OCR fallback only");
+            }
+        } else {
+            winalp_log(WINALP_LOG_INFO, "doc_router: model not VLM — mmproj loaded for future use");
+        }
     } else {
-        winalp_log(WINALP_LOG_INFO, "doc_router: no VLM found — OCR-only mode");
+        winalp_log(WINALP_LOG_INFO, "doc_router: no mmproj found — OCR-only mode");
     }
 
     /* Initialise OCR engine */
@@ -52,15 +81,34 @@ bool doc_router_process_image(const unsigned char *bitmap, int width, int height
     if (!bitmap || !out_text) return false;
     *out_text = NULL;
 
-    if (s_vlm_available && ai_engine_is_vlm()) {
-        /* VLM path — model has encoder but mtmd/clip library not linked yet */
-        winalp_log(WINALP_LOG_INFO, "doc_router: VLM loaded but mtmd not integrated — using OCR fallback");
-    } else if (s_vlm_available) {
-        /* mmproj found but current model isn't VLM */
+    if (s_vlm_available && ai_engine_is_vlm() && vlm_engine_is_ready()) {
+        /* VLM path — convert BGRA 32bpp → RGB 24bpp, process via mtmd */
+        int n_pixels = width * height;
+        unsigned char *rgb = (unsigned char*)malloc((size_t)n_pixels * 3);
+        if (rgb) {
+            vlm_engine_bgra_to_rgb(bitmap, width, height, rgb);
+            char vlm_buf[32768];
+            struct CollectCtx vlm_ctx = { .buf = vlm_buf, .pos = 0, .cap = (int)sizeof(vlm_buf) };
+            bool ok = vlm_engine_process("Describe this image in detail.",
+                                          rgb, width, height,
+                                          collect_cb, &vlm_ctx);
+            free(rgb);
+            if (ok && vlm_ctx.pos > 0) {
+                *out_text = (char*)malloc((size_t)vlm_ctx.pos + 1);
+                if (*out_text) {
+                    memcpy(*out_text, vlm_buf, (size_t)vlm_ctx.pos);
+                    (*out_text)[vlm_ctx.pos] = '\0';
+                }
+                winalp_log(WINALP_LOG_INFO, "doc_router: VLM returned %d chars", vlm_ctx.pos);
+                return true;
+            }
+            winalp_log(WINALP_LOG_WARN, "doc_router: VLM returned no content — OCR fallback");
+        }
+    } else if (s_vlm_available && !ai_engine_is_vlm()) {
         winalp_log(WINALP_LOG_INFO, "doc_router: mmproj found but model is not VLM");
     }
 
-    /* OCR path — use Windows built-in OCR engine */
+    /* OCR fallback — use Windows built-in OCR engine */
     if (ocr_engine_recognize(bitmap, width, height, out_text)) {
         winalp_log(WINALP_LOG_INFO, "doc_router: OCR recognized %zu chars",
                    *out_text ? strlen(*out_text) : 0);
@@ -102,6 +150,7 @@ bool doc_router_process_pdf_page(const char *pdf_path, int page_num, char **out_
 }
 
 void doc_router_shutdown(void) {
+    vlm_engine_shutdown();
     ocr_engine_shutdown();
     s_vlm_available = false;
 }

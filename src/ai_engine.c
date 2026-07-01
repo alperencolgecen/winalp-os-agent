@@ -282,3 +282,11 @@ float ai_engine_tokens_per_sec(void) {
 int ai_engine_context_usage(void) {
     return s_ctx_usage_pct;
 }
+
+struct llama_context * ai_engine_get_llama_ctx(void) {
+    return s_ctx;
+}
+
+struct llama_model * ai_engine_get_model(void) {
+    return s_model;
+}

@@ -22,6 +22,12 @@ float ai_engine_tokens_per_sec(void);
 int   ai_engine_context_usage(void);
 bool  ai_engine_is_vlm(void);
 
+/* Accessors for VLM/mtmd integration */
+struct llama_context;
+struct llama_model;
+struct llama_context * ai_engine_get_llama_ctx(void);
+struct llama_model  * ai_engine_get_model(void);
+
 #ifdef __cplusplus
 }
 #endif

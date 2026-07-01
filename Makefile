@@ -9,16 +9,19 @@ CXX      = g++
 INCS     = -Iinclude -Ilib/raylib/include -Ilib/imgui \
            -Ilib/whisper.cpp/include -Ilib/whisper.cpp/ggml/include \
            -Ilib/llama.cpp/include -Ilib/llama.cpp/ggml/include \
-           -Ilib/lua/include
+           -Ilib/lua/include \
+           -Ilib/llama.cpp/tools/mtmd \
+           -Ilib/llama.cpp/vendor
 CFLAGS   = -std=c11 -O2 -Wall -Wextra -DWIN32_LEAN_AND_MEAN $(INCS)
-CXXFLAGS = -std=c++17 -O2 -Wall -Wextra -DWIN32_LEAN_AND_MEAN $(INCS)
+CXXFLAGS = -std=c++17 -O2 -Wall -Wextra -DWIN32_LEAN_AND_MEAN -D_USE_MATH_DEFINES $(INCS)
 LDFLAGS  = -Llib/raylib/lib \
            -Llib/whisper -lwhisper \
            -Llib/llama -lllama -lggml -lggml-cpu -lggml-base \
            -Llib/lua -llua \
            -lraylib -lopengl32 -lgdi32 -lwinmm -lole32 -luuid -ldxgi -ld3d11 \
             -lksuser -lcrypt32 -lm \
-           -static -lstdc++ -lwinpthread -fopenmp
+           -static -lstdc++ -lwinpthread -fopenmp \
+           -Wl,--allow-multiple-definition
 
 TARGET  = WinAlp.exe
 BUILDDIR= build
@@ -41,7 +44,8 @@ C_SRCS = $(SRCDIR)/main.c \
           $(SRCDIR)/dpapi_crypt.c \
           $(SRCDIR)/sys_diag.c \
           $(SRCDIR)/thread_pool.c \
-          $(SRCDIR)/doc_router.c
+           $(SRCDIR)/doc_router.c \
+           $(SRCDIR)/vlm_engine.c
 
 # C++ source files (project modules + ImGui + ImPlot + raylib backend)
 CXX_SRCS = $(SRCDIR)/ui_render.cpp \
@@ -59,10 +63,20 @@ CXX_SRCS = $(SRCDIR)/ui_render.cpp \
            $(LIBDIR)/imgui/implot_demo.cpp \
            $(LIBDIR)/imgui/imgui_impl_raylib.cpp
 
+# mtmd multimodal sources
+MTMD_DIR  = lib/llama.cpp/tools/mtmd
+MTMD_SRCS = $(MTMD_DIR)/clip.cpp \
+            $(MTMD_DIR)/mtmd.cpp \
+            $(MTMD_DIR)/mtmd-image.cpp \
+            $(MTMD_DIR)/mtmd-helper.cpp \
+            $(MTMD_DIR)/mtmd-audio.cpp
+MTMD_MODEL_SRCS = $(wildcard $(MTMD_DIR)/models/*.cpp)
+
 C_OBJS = $(patsubst $(SRCDIR)/%.c, $(BUILDDIR)/%.o, $(C_SRCS))
 CXX_SRC_OBJS = $(patsubst $(SRCDIR)/%.cpp, $(BUILDDIR)/%.o, $(filter $(SRCDIR)/%.cpp, $(CXX_SRCS)))
 CXX_LIB_OBJS = $(patsubst $(LIBDIR)/%.cpp, $(BUILDDIR)/%.o, $(filter $(LIBDIR)/%.cpp, $(CXX_SRCS)))
-ALL_OBJS = $(C_OBJS) $(CXX_SRC_OBJS) $(CXX_LIB_OBJS)
+MTMD_OBJS = $(patsubst $(MTMD_DIR)/%.cpp, $(BUILDDIR)/mtmd/%.o, $(MTMD_SRCS) $(MTMD_MODEL_SRCS))
+ALL_OBJS = $(C_OBJS) $(CXX_SRC_OBJS) $(CXX_LIB_OBJS) $(MTMD_OBJS)
 
 .PHONY: all clean run submodule-libs
 
@@ -92,6 +106,10 @@ $(BUILDDIR)/%.o: $(SRCDIR)/%.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(BUILDDIR)/imgui/%.o: $(LIBDIR)/imgui/%.cpp
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(BUILDDIR)/mtmd/%.o: $(MTMD_DIR)/%.cpp
+	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(TARGET): $(ALL_OBJS)
