@@ -27,11 +27,16 @@ typedef struct {
     char data_dir[MAX_PATH_LEN]; /* sandboxed data directory */
     bool active;
     char dir[MAX_PATH_LEN];
+    __int64 last_write;          /* for hot-reload detection */
+    __int64 meta_write;
 } Plugin;
 
 static char s_dir[MAX_PATH_LEN];
 static Plugin s_plugins[MAX_PLUGINS];
 static int s_n;
+
+static PluginActionCallback s_action_cb;
+static void *s_action_ud;
 
 /* Blacklist check */
 static bool is_blacklisted(const char *func_name) {
@@ -58,6 +63,11 @@ static bool ensure_sandbox_dir(const char *plugin_name) {
     CreateDirectoryA(tmp, NULL);
 
     return true;
+}
+
+void plugin_manager_set_action_cb(PluginActionCallback cb, void *ud) {
+    s_action_cb = cb;
+    s_action_ud = ud;
 }
 
 bool plugin_manager_init(const char *plugins_dir) {
@@ -213,6 +223,99 @@ char *plugin_manager_build_guide(void) {
     return out;
 }
 
+/* Hot-reload: poll each plugin's plugin.json and main.lua for changes */
+int plugin_manager_watch(void) {
+    int reloaded = 0;
+    for (int i = 0; i < s_n; i++) {
+        /* Check plugin.json */
+        char meta_path[MAX_PATH_LEN];
+        snprintf(meta_path, sizeof(meta_path), "%s\\%s\\plugin.json", s_dir, s_plugins[i].dir);
+
+        WIN32_FILE_ATTRIBUTE_DATA info;
+        if (GetFileAttributesExA(meta_path, GetFileExInfoStandard, &info)) {
+            __int64 mtime = ((__int64)info.ftLastWriteTime.dwHighDateTime << 32)
+                          | (__int64)info.ftLastWriteTime.dwLowDateTime;
+            if (mtime != s_plugins[i].meta_write) {
+                s_plugins[i].meta_write = mtime;
+                /* Reload this plugin */
+                FILE *f = fopen(meta_path, "r");
+                if (f) {
+                    char buf[4096]; size_t nr = fread(buf, 1, sizeof(buf) - 1, f);
+                    buf[nr] = '\0'; fclose(f);
+
+                    const char *nstart = strstr(buf, "\"actions\"");
+                    if (nstart) {
+                        nstart = strchr(nstart + 8, '[');
+                        if (nstart) {
+                            nstart++;
+                            int ai = 0; char new_actions[1024] = "";
+                            while (*nstart && *nstart != ']' && ai < (int)sizeof(new_actions) - 1)
+                                new_actions[ai++] = *nstart++;
+                            new_actions[ai] = '\0';
+                            /* Notify about removed actions */
+                            if (s_action_cb && s_plugins[i].actions[0]) {
+                                char *tok = strtok(s_plugins[i].actions, " ,\"\n\r\t");
+                                while (tok) {
+                                    if (!strstr(new_actions, tok))
+                                        s_action_cb(tok, false, s_action_ud);
+                                    tok = strtok(NULL, " ,\"\n\r\t");
+                                }
+                            }
+                            strncpy(s_plugins[i].actions, new_actions, sizeof(s_plugins[i].actions) - 1);
+                            /* Notify about added actions */
+                            if (s_action_cb) {
+                                char copy[1024]; strncpy(copy, new_actions, sizeof(copy) - 1);
+                                char *tok = strtok(copy, " ,\"\n\r\t");
+                                while (tok) {
+                                    s_action_cb(tok, true, s_action_ud);
+                                    tok = strtok(NULL, " ,\"\n\r\t");
+                                }
+                            }
+                            winalp_log(WINALP_LOG_INFO,
+                                       "plugin_manager: hot-reloaded %s", s_plugins[i].name);
+                            reloaded++;
+                        }
+                    }
+                }
+            }
+        }
+
+        /* Check main.lua */
+        WIN32_FILE_ATTRIBUTE_DATA linfo;
+        if (GetFileAttributesExA(s_plugins[i].entry, GetFileExInfoStandard, &linfo)) {
+            __int64 lt = ((__int64)linfo.ftLastWriteTime.dwHighDateTime << 32)
+                       | (__int64)linfo.ftLastWriteTime.dwLowDateTime;
+            if (lt != s_plugins[i].last_write) {
+                s_plugins[i].last_write = lt;
+                winalp_log(WINALP_LOG_INFO, "plugin_manager: script changed: %s",
+                           s_plugins[i].entry);
+                reloaded++;
+            }
+        }
+    }
+    return reloaded;
+}
+
+/* Build comma-separated list of all registered actions from active plugins */
+char *plugin_manager_get_actions(void) {
+    size_t total = 1;
+    for (int i = 0; i < s_n; i++) {
+        if (!s_plugins[i].active) continue;
+        total += strlen(s_plugins[i].actions) + 2;
+    }
+    char *out = (char*)malloc(total);
+    if (!out) return NULL;
+    out[0] = '\0';
+    for (int i = 0; i < s_n; i++) {
+        if (!s_plugins[i].active) continue;
+        if (out[0]) strcat(out, ",");
+        strcat(out, s_plugins[i].actions);
+    }
+    return out;
+}
+
 void plugin_manager_shutdown(void) {
     s_n = 0;
+    s_action_cb = NULL;
+    s_action_ud = NULL;
 }

@@ -18,6 +18,16 @@ char *plugin_manager_build_guide(void);
 /* Sandbox: check if action is allowed (not blacklisted) */
 bool plugin_manager_is_action_allowed(const char *action);
 
+/* Hot-reload watcher — call each frame; returns number of (re)loaded plugins */
+int  plugin_manager_watch(void);
+
+/* Get combined action list from all active plugins (caller frees) */
+char *plugin_manager_get_actions(void);
+
+/* Register a callback for when plugins add/remove actions */
+typedef void (*PluginActionCallback)(const char *action_name, bool added, void *ud);
+void plugin_manager_set_action_cb(PluginActionCallback cb, void *ud);
+
 void plugin_manager_shutdown(void);
 
 #endif /* PLUGIN_MANAGER_H */
