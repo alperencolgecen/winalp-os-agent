@@ -75,9 +75,8 @@ static int lua_log_info(lua_State *L) {
 /* file_read(path) → string or nil (sandboxed) */
 static int lua_file_read(lua_State *L) {
     const char *path = luaL_checkstring(L, 1);
-    /* Get sandbox_dir from Lua upvalue */
-    const char *sandbox = (const char*)lua_touserdata(L, lua_upvalueindex(1));
-    if (!sandbox_verify_path(sandbox, path)) {
+    const char *sandbox = lua_tostring(L, lua_upvalueindex(1));
+    if (!sandbox || !sandbox_verify_path(sandbox, path)) {
         lua_pushnil(L);
         return 1;
     }
@@ -100,8 +99,8 @@ static int lua_file_write(lua_State *L) {
     const char *path = luaL_checkstring(L, 1);
     size_t len;
     const char *content = luaL_checklstring(L, 2, &len);
-    const char *sandbox = (const char*)lua_touserdata(L, lua_upvalueindex(1));
-    if (!sandbox_verify_path(sandbox, path)) {
+    const char *sandbox = lua_tostring(L, lua_upvalueindex(1));
+    if (!sandbox || !sandbox_verify_path(sandbox, path)) {
         lua_pushboolean(L, 0);
         return 1;
     }
@@ -122,8 +121,8 @@ static int lua_file_write(lua_State *L) {
 /* file_delete(path) → bool (sandboxed) */
 static int lua_file_delete(lua_State *L) {
     const char *path = luaL_checkstring(L, 1);
-    const char *sandbox = (const char*)lua_touserdata(L, lua_upvalueindex(1));
-    if (!sandbox_verify_path(sandbox, path)) {
+    const char *sandbox = lua_tostring(L, lua_upvalueindex(1));
+    if (!sandbox || !sandbox_verify_path(sandbox, path)) {
         lua_pushboolean(L, 0);
         return 1;
     }
@@ -182,10 +181,7 @@ lua_State *lua_runtime_new_state(const char *sandbox_data_dir) {
         size_t slen = strlen(sb);
         if (slen > 0 && sb[slen - 1] == '\\') sb[slen - 1] = '\0';
 
-        /* Allocate and store sandbox path in Lua registry */
-        char *sd = (char*)lua_newuserdata(L, strlen(sb) + 1);
-        strcpy(sd, sb);
-
+        /* Register non-sandboxed functions first */
         lua_pushcclosure(L, lua_store_get, 0);
         lua_setglobal(L, "store_get");
 
@@ -195,12 +191,16 @@ lua_State *lua_runtime_new_state(const char *sandbox_data_dir) {
         lua_pushcclosure(L, lua_log_info, 0);
         lua_setglobal(L, "log_info");
 
+        /* File APIs: push sandbox string as upvalue for each */
+        lua_pushstring(L, sb);
         lua_pushcclosure(L, lua_file_read, 1);
         lua_setglobal(L, "file_read");
 
+        lua_pushstring(L, sb);
         lua_pushcclosure(L, lua_file_write, 1);
         lua_setglobal(L, "file_write");
 
+        lua_pushstring(L, sb);
         lua_pushcclosure(L, lua_file_delete, 1);
         lua_setglobal(L, "file_delete");
     }
@@ -252,6 +252,30 @@ bool lua_runtime_dostring(lua_State *L, const char *chunk) {
         return false;
     }
     return true;
+}
+
+const char *lua_runtime_dostring_result(lua_State *L, const char *chunk) {
+    if (!L || !chunk) return NULL;
+    if (luaL_loadstring(L, chunk) != LUA_OK) {
+        snprintf(s_last_error, sizeof(s_last_error), "lua: load error: %s",
+                 lua_tostring(L, -1));
+        lua_pop(L, 1);
+        return NULL;
+    }
+    if (lua_pcall(L, 0, 1, 0) != LUA_OK) {
+        snprintf(s_last_error, sizeof(s_last_error), "lua: exec error: %s",
+                 lua_tostring(L, -1));
+        lua_pop(L, 1);
+        return NULL;
+    }
+    const char *s = lua_tostring(L, -1);
+    if (!s) {
+        lua_pop(L, 1);
+        return NULL;
+    }
+    snprintf(s_last_error, sizeof(s_last_error), "%s", s);
+    lua_pop(L, 1);
+    return s_last_error;
 }
 
 /* Close a Lua state */

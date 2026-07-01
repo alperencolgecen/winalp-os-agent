@@ -3,6 +3,19 @@
 #define SYSTEM_AGENT_H
 #include <stdbool.h>
 
+/* One-shot JSON action result */
+typedef struct {
+    char type[64];
+    char path[1024];
+    char content[65536];
+} AgentAction;
+
+/* Parse a complete JSON action string; returns 1 on success, 0 on failure */
+int system_agent_parse(const char *json, int len, AgentAction *out);
+
+/* Validate a path against the sandbox whitelist */
+bool system_agent_validate_path(const char *path);
+
 /* Returns true if a complete action was parsed and queued */
 bool system_agent_feed(const char *token);
 

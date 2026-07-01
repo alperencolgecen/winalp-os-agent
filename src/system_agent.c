@@ -53,7 +53,7 @@ void system_agent_set_plugin_action_cb(PluginActionCallback cb, void *ud) {
 enum { J_INIT, J_IN_KEY, J_IN_STR, J_IN_INT, J_DONE };
 
 /* Extract value for a given key from a JSON object, regex-free state machine */
-static int extract_str(const char *src, const char *key, char *out, int out_sz) {
+int extract_str(const char *src, const char *key, char *out, int out_sz) {
     if (!src || !key) return 0;
     out[0] = '\0';
     int state = J_INIT, ki = 0;
@@ -67,8 +67,12 @@ static int extract_str(const char *src, const char *key, char *out, int out_sz) 
             if (c == '{') state = J_IN_KEY, cur_key_len = 0;
             break;
         case J_IN_KEY:
-            if (c == '"' && (p == src || *(p-1) != '\\')) {
-                /* end of key string */
+            /* Skip separators and whitespace before key */
+            if (cur_key_len == 0 && (c == ' ' || c == ',' || c == '\t' ||
+                                     c == '\n' || c == '\r'))
+                continue;
+            if (c == '"' && cur_key_len > 0) {
+                /* end of key string (closing quote) */
                 cur_key[cur_key_len] = '\0';
                 /* skip whitespace and colon */
                 p++;
@@ -76,7 +80,6 @@ static int extract_str(const char *src, const char *key, char *out, int out_sz) 
                 if (!*p) return 0;
                 if (*p == '"') { state = J_IN_STR; ki = 0; }
                 else if (*p == '{' || *p == '[') {
-                    /* skip nested object/array */
                     int depth = 1; p++;
                     while (*p && depth > 0) {
                         if (*p == '{' || *p == '[') depth++;
@@ -88,7 +91,6 @@ static int extract_str(const char *src, const char *key, char *out, int out_sz) 
                 } else { state = J_IN_INT; ki = 0; }
                 /* check if this is our target key */
                 if (strcmp(cur_key, key) != 0) {
-                    /* skip value */
                     if (state == J_IN_STR) {
                         while (*p && !(*p == '"' && *(p-1) != '\\')) p++;
                     } else if (state == J_IN_INT) {
@@ -97,6 +99,10 @@ static int extract_str(const char *src, const char *key, char *out, int out_sz) 
                     state = J_IN_KEY; cur_key_len = 0;
                     if (*p) p--;
                 }
+                continue;
+            }
+            if (c == '"' && cur_key_len == 0) {
+                /* opening quote — skip */
                 continue;
             }
             if (cur_key_len < (int)sizeof(cur_key) - 1)
@@ -335,4 +341,19 @@ void system_agent_flush(void) {
     s_think_state = THINK_IDLE;
     s_tag_pos = 0;
     s_think_len = 0;
+}
+
+int system_agent_parse(const char *json, int len, AgentAction *out) {
+    (void)len;
+    if (!json || !out) return 0;
+    memset(out, 0, sizeof(*out));
+    if (!extract_str(json, "action", out->type, sizeof(out->type)))
+        return 0;
+    extract_str(json, "path", out->path, sizeof(out->path));
+    extract_str(json, "content", out->content, sizeof(out->content));
+    return 1;
+}
+
+bool system_agent_validate_path(const char *path) {
+    return path_verify(path);
 }

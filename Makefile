@@ -103,6 +103,21 @@ run: all
 clean:
 	rm -rf $(BUILDDIR) $(TARGET)
 
+# ---------- Tests ----------
+TEST_TARGET = tests/WinAlp_tests.exe
+TEST_SRC    = tests/test_runner.c
+TEST_OBJ    = $(BUILDDIR)/test_runner.o
+
+$(TEST_OBJ): $(TEST_SRC)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(TEST_TARGET): submodule-libs $(BUILDDIR) $(ALL_OBJS) $(TEST_OBJ)
+	$(CC) $(filter-out $(BUILDDIR)/main.o, $(ALL_OBJS)) $(TEST_OBJ) -o $@ $(LDFLAGS)
+	@echo "Test build complete: $(TEST_TARGET)"
+
+test: $(TEST_TARGET)
+	./$(TEST_TARGET)
+
 # ---------- Download STT model (Whisper tiny, ~75MB) ----------
 WHISPER_MODEL_URL = https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin
 WHISPER_MODEL_PATH = models/ggml-tiny.bin

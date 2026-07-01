@@ -18,6 +18,9 @@ bool lua_runtime_dofile(lua_State *L, const char *path);
 /* Run a Lua string chunk; returns true on success */
 bool lua_runtime_dostring(lua_State *L, const char *chunk);
 
+/* Run a Lua string chunk and return the first result as string (NULL on error) */
+const char *lua_runtime_dostring_result(lua_State *L, const char *chunk);
+
 /* Close a Lua state */
 void lua_runtime_close(lua_State *L);
 
