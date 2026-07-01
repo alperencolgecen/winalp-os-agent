@@ -8,14 +8,16 @@ CC       = gcc
 CXX      = g++
 INCS     = -Iinclude -Ilib/raylib/include -Ilib/imgui \
            -Ilib/whisper.cpp/include -Ilib/whisper.cpp/ggml/include \
-           -Ilib/llama.cpp/include -Ilib/llama.cpp/ggml/include
+           -Ilib/llama.cpp/include -Ilib/llama.cpp/ggml/include \
+           -Ilib/lua/include
 CFLAGS   = -std=c11 -O2 -Wall -Wextra -DWIN32_LEAN_AND_MEAN $(INCS)
 CXXFLAGS = -std=c++17 -O2 -Wall -Wextra -DWIN32_LEAN_AND_MEAN $(INCS)
 LDFLAGS  = -Llib/raylib/lib \
            -Llib/whisper -lwhisper \
            -Llib/llama -lllama -lggml -lggml-cpu -lggml-base \
+           -Llib/lua -llua \
            -lraylib -lopengl32 -lgdi32 -lwinmm -lole32 -luuid -ldxgi -ld3d11 \
-            -lksuser -lcrypt32 \
+            -lksuser -lcrypt32 -lm \
            -static -lstdc++ -lwinpthread -fopenmp
 
 TARGET  = WinAlp.exe
@@ -71,6 +73,10 @@ submodule-libs:
 	@test -f "$(LIBDIR)/llama/libllama.a" || { \
 	    echo "Building llama.cpp static libraries..."; \
 	    "scripts/build_llama.bat"; \
+	}
+	@test -f "$(LIBDIR)/lua/liblua.a" || { \
+	    echo "Building Lua static library..."; \
+	    "scripts/build_lua.bat"; \
 	}
 
 $(BUILDDIR):
