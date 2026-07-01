@@ -312,7 +312,7 @@ bool thread_pool_start_all(void) {
 bool thread_pool_stop_all(void) {
     s_running = false;
     if (s_nthreads > 0) {
-        WaitForMultipleObjects((DWORD)s_nthreads, s_threads, TRUE, 5000);
+        WaitForMultipleObjects((DWORD)s_nthreads, s_threads, TRUE, 200);
         for (int i = 0; i < s_nthreads; i++)
             CloseHandle(s_threads[i]);
     }
