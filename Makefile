@@ -46,6 +46,7 @@ C_SRCS = $(SRCDIR)/main.c \
 # C++ source files (project modules + ImGui + ImPlot + raylib backend)
 CXX_SRCS = $(SRCDIR)/ui_render.cpp \
            $(SRCDIR)/stt_engine.cpp \
+           $(SRCDIR)/ocr_engine.cpp \
            $(LIBDIR)/imgui/imgui.cpp \
            $(LIBDIR)/imgui/imgui_draw.cpp \
            $(LIBDIR)/imgui/imgui_tables.cpp \
