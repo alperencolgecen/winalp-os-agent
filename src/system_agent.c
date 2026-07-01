@@ -17,8 +17,10 @@ static ConfirmCallback    s_confirm_cb;
 static void             *s_confirm_ud;
 static FileContentCallback  s_content_cb;
 static void             *s_content_ud;
-static ReasoningCallback   s_reason_cb;
-static void             *s_reason_ud;
+static ReasoningCallback    s_reason_cb;
+static void               *s_reason_ud;
+static PluginActionCallback s_plugin_cb;
+static void               *s_plugin_ud;
 
 /* <think> tag parser state */
 enum { THINK_IDLE, THINK_OPENING, THINK_BODY, THINK_CLOSING };
@@ -40,6 +42,11 @@ void system_agent_set_content_cb(FileContentCallback cb, void *ud) {
 void system_agent_set_reasoning_cb(ReasoningCallback cb, void *ud) {
     s_reason_cb = cb;
     s_reason_ud = ud;
+}
+
+void system_agent_set_plugin_action_cb(PluginActionCallback cb, void *ud) {
+    s_plugin_cb = cb;
+    s_plugin_ud = ud;
 }
 
 /* JSON tokeniser states */
@@ -219,6 +226,8 @@ static void exec_action(const char *json) {
     } else if (strcmp(action, "update_profile") == 0) {
         winalp_log(WINALP_LOG_INFO, "agent: profile update: %s = %s", path, content);
 
+    } else if (s_plugin_cb && s_plugin_cb(action, path, content, s_plugin_ud)) {
+        winalp_log(WINALP_LOG_INFO, "agent: plugin handled action: %s", action);
     } else {
         winalp_log(WINALP_LOG_WARN, "agent: unknown action: %s", action);
     }

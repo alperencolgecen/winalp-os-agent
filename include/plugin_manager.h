@@ -25,8 +25,12 @@ int  plugin_manager_watch(void);
 char *plugin_manager_get_actions(void);
 
 /* Register a callback for when plugins add/remove actions */
-typedef void (*PluginActionCallback)(const char *action_name, bool added, void *ud);
-void plugin_manager_set_action_cb(PluginActionCallback cb, void *ud);
+typedef void (*PluginActionCb)(const char *action_name, bool added, void *ud);
+void plugin_manager_set_action_cb(PluginActionCb cb, void *ud);
+
+/* Execute a plugin action — returns true if a plugin handled it */
+bool plugin_manager_execute_action(const char *action, const char *path,
+                                    const char *content, void *ud);
 
 void plugin_manager_shutdown(void);
 

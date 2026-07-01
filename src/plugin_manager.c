@@ -1,6 +1,9 @@
 #include "../include/plugin_manager.h"
+#include "../include/lua_runtime.h"
 #include "../include/logger.h"
 #include "../include/memory_store.h"
+#include <lua.h>
+#include <lauxlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -27,6 +30,7 @@ typedef struct {
     char data_dir[MAX_PATH_LEN]; /* sandboxed data directory */
     bool active;
     char dir[MAX_PATH_LEN];
+    lua_State *L;                /* Lua state for this plugin */
     __int64 last_write;          /* for hot-reload detection */
     __int64 meta_write;
 } Plugin;
@@ -35,7 +39,7 @@ static char s_dir[MAX_PATH_LEN];
 static Plugin s_plugins[MAX_PLUGINS];
 static int s_n;
 
-static PluginActionCallback s_action_cb;
+static PluginActionCb s_action_cb;
 static void *s_action_ud;
 
 /* Blacklist check */
@@ -65,7 +69,7 @@ static bool ensure_sandbox_dir(const char *plugin_name) {
     return true;
 }
 
-void plugin_manager_set_action_cb(PluginActionCallback cb, void *ud) {
+void plugin_manager_set_action_cb(PluginActionCb cb, void *ud) {
     s_action_cb = cb;
     s_action_ud = ud;
 }
@@ -73,8 +77,6 @@ void plugin_manager_set_action_cb(PluginActionCallback cb, void *ud) {
 bool plugin_manager_init(const char *plugins_dir) {
     if (!plugins_dir) return false;
     strncpy(s_dir, plugins_dir, sizeof(s_dir) - 1);
-
-    /* Ensure plugins/ root dir exists */
     CreateDirectoryA(s_dir, NULL);
     return true;
 }
@@ -143,6 +145,7 @@ int plugin_manager_scan(void) {
         }
 
         p->active = false;
+        p->L = NULL;
         snprintf(p->entry, sizeof(p->entry), "%s\\%s\\main.lua", s_dir, fd.cFileName);
         snprintf(p->data_dir, sizeof(p->data_dir), "profile/plugins/%s/data", p->name);
 
@@ -161,7 +164,7 @@ int plugin_manager_scan(void) {
                 }
                 tok = strtok(NULL, " ,\"\n\r\t");
             }
-            if (!p->name[0]) continue; /* skip invalid plugin */
+            if (!p->name[0]) continue;
         }
 
         s_n++;
@@ -176,7 +179,25 @@ bool plugin_manager_activate(const char *name) {
     if (!name) return false;
     for (int i = 0; i < s_n; i++) {
         if (strcmp(s_plugins[i].name, name) == 0) {
+            if (s_plugins[i].active) return true;
             ensure_sandbox_dir(s_plugins[i].name);
+
+            /* Create Lua state and load main.lua */
+            s_plugins[i].L = lua_runtime_new_state(s_plugins[i].data_dir);
+            if (s_plugins[i].L) {
+                /* Run the plugin entry script */
+                if (lua_runtime_dofile(s_plugins[i].L, s_plugins[i].entry)) {
+                    winalp_log(WINALP_LOG_INFO, "plugin_manager: loaded script: %s",
+                               s_plugins[i].entry);
+                } else {
+                    winalp_log(WINALP_LOG_WARN, "plugin_manager: script load failed: %s (%s)",
+                               s_plugins[i].entry, lua_runtime_last_error());
+                }
+            } else {
+                winalp_log(WINALP_LOG_ERROR, "plugin_manager: failed to create Lua state for %s",
+                           name);
+            }
+
             s_plugins[i].active = true;
             winalp_log(WINALP_LOG_INFO, "plugin_manager: activated: %s (sandbox: %s)",
                        name, s_plugins[i].data_dir);
@@ -190,10 +211,53 @@ bool plugin_manager_deactivate(const char *name) {
     if (!name) return false;
     for (int i = 0; i < s_n; i++) {
         if (strcmp(s_plugins[i].name, name) == 0) {
+            if (s_plugins[i].L) {
+                lua_runtime_close(s_plugins[i].L);
+                s_plugins[i].L = NULL;
+            }
             s_plugins[i].active = false;
             winalp_log(WINALP_LOG_INFO, "plugin_manager: deactivated: %s", name);
             return true;
         }
+    }
+    return false;
+}
+
+/* Execute a plugin action: find the plugin that owns this action and call its Lua handler */
+bool plugin_manager_execute_action(const char *action, const char *path,
+                                    const char *content, void *ud) {
+    (void)ud;
+    if (!action) return false;
+
+    /* Find the active plugin that registered this action */
+    for (int i = 0; i < s_n; i++) {
+        if (!s_plugins[i].active || !s_plugins[i].L) continue;
+        if (!strstr(s_plugins[i].actions, action)) continue;
+
+        /* Call the handle_action(action, path, content) function in plugin's Lua state */
+        lua_State *L = s_plugins[i].L;
+        lua_getglobal(L, "handle_action");
+        if (lua_isnil(L, -1)) {
+            lua_pop(L, 1);
+            continue; /* no handler defined */
+        }
+        lua_pushstring(L, action);
+        lua_pushstring(L, path ? path : "");
+        lua_pushstring(L, content ? content : "");
+        if (lua_pcall(L, 3, 1, 0) != LUA_OK) {
+            winalp_log(WINALP_LOG_ERROR, "plugin_manager: Lua handler error: %s",
+                       lua_tostring(L, -1));
+            lua_pop(L, 1);
+            return false;
+        }
+        bool handled = lua_toboolean(L, -1) != 0;
+        lua_pop(L, 1);
+        if (handled) {
+            winalp_log(WINALP_LOG_INFO, "plugin_manager: action '%s' handled by %s",
+                       action, s_plugins[i].name);
+            return true;
+        }
+        return false;
     }
     return false;
 }
@@ -227,7 +291,6 @@ char *plugin_manager_build_guide(void) {
 int plugin_manager_watch(void) {
     int reloaded = 0;
     for (int i = 0; i < s_n; i++) {
-        /* Check plugin.json */
         char meta_path[MAX_PATH_LEN];
         snprintf(meta_path, sizeof(meta_path), "%s\\%s\\plugin.json", s_dir, s_plugins[i].dir);
 
@@ -237,7 +300,6 @@ int plugin_manager_watch(void) {
                           | (__int64)info.ftLastWriteTime.dwLowDateTime;
             if (mtime != s_plugins[i].meta_write) {
                 s_plugins[i].meta_write = mtime;
-                /* Reload this plugin */
                 FILE *f = fopen(meta_path, "r");
                 if (f) {
                     char buf[4096]; size_t nr = fread(buf, 1, sizeof(buf) - 1, f);
@@ -252,7 +314,6 @@ int plugin_manager_watch(void) {
                             while (*nstart && *nstart != ']' && ai < (int)sizeof(new_actions) - 1)
                                 new_actions[ai++] = *nstart++;
                             new_actions[ai] = '\0';
-                            /* Notify about removed actions */
                             if (s_action_cb && s_plugins[i].actions[0]) {
                                 char *tok = strtok(s_plugins[i].actions, " ,\"\n\r\t");
                                 while (tok) {
@@ -262,7 +323,6 @@ int plugin_manager_watch(void) {
                                 }
                             }
                             strncpy(s_plugins[i].actions, new_actions, sizeof(s_plugins[i].actions) - 1);
-                            /* Notify about added actions */
                             if (s_action_cb) {
                                 char copy[1024]; strncpy(copy, new_actions, sizeof(copy) - 1);
                                 char *tok = strtok(copy, " ,\"\n\r\t");
@@ -280,15 +340,23 @@ int plugin_manager_watch(void) {
             }
         }
 
-        /* Check main.lua */
         WIN32_FILE_ATTRIBUTE_DATA linfo;
         if (GetFileAttributesExA(s_plugins[i].entry, GetFileExInfoStandard, &linfo)) {
             __int64 lt = ((__int64)linfo.ftLastWriteTime.dwHighDateTime << 32)
                        | (__int64)linfo.ftLastWriteTime.dwLowDateTime;
             if (lt != s_plugins[i].last_write) {
                 s_plugins[i].last_write = lt;
-                winalp_log(WINALP_LOG_INFO, "plugin_manager: script changed: %s",
-                           s_plugins[i].entry);
+                /* Reload the Lua script if plugin is active */
+                if (s_plugins[i].active && s_plugins[i].L) {
+                    /* Close old state and re-create */
+                    lua_runtime_close(s_plugins[i].L);
+                    s_plugins[i].L = lua_runtime_new_state(s_plugins[i].data_dir);
+                    if (s_plugins[i].L) {
+                        lua_runtime_dofile(s_plugins[i].L, s_plugins[i].entry);
+                        winalp_log(WINALP_LOG_INFO,
+                                   "plugin_manager: hot-reloaded script: %s", s_plugins[i].entry);
+                    }
+                }
                 reloaded++;
             }
         }
@@ -296,7 +364,6 @@ int plugin_manager_watch(void) {
     return reloaded;
 }
 
-/* Build comma-separated list of all registered actions from active plugins */
 char *plugin_manager_get_actions(void) {
     size_t total = 1;
     for (int i = 0; i < s_n; i++) {
@@ -315,6 +382,12 @@ char *plugin_manager_get_actions(void) {
 }
 
 void plugin_manager_shutdown(void) {
+    for (int i = 0; i < s_n; i++) {
+        if (s_plugins[i].L) {
+            lua_runtime_close(s_plugins[i].L);
+            s_plugins[i].L = NULL;
+        }
+    }
     s_n = 0;
     s_action_cb = NULL;
     s_action_ud = NULL;

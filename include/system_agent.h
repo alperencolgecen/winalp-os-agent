@@ -21,4 +21,9 @@ void system_agent_set_content_cb(FileContentCallback cb, void *ud);
 typedef void (*ReasoningCallback)(const char *reasoning, void *ud);
 void system_agent_set_reasoning_cb(ReasoningCallback cb, void *ud);
 
+/* Register a callback for unknown plugin actions — returns true if handled */
+typedef bool (*PluginActionCallback)(const char *action, const char *path,
+                                      const char *content, void *ud);
+void system_agent_set_plugin_action_cb(PluginActionCallback cb, void *ud);
+
 #endif /* SYSTEM_AGENT_H */

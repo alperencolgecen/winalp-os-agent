@@ -122,6 +122,7 @@ int main(void) {
 
     /* System agent */
     system_agent_set_confirm_cb(confirm_cb, NULL);
+    system_agent_set_plugin_action_cb(plugin_manager_execute_action, NULL);
 
     /* Mic */
     bool mic_ok = audio_capture_start();
