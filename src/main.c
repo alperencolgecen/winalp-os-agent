@@ -44,6 +44,7 @@ static void on_stt_result(const char *text, void *ud) {
     (void)ud;
     if (!text || !text[0]) return;
     winalp_log(WINALP_LOG_INFO, "main: push-to-talk: %s", text);
+    ui_render_set_transcript(text);
     memory_store_append_message("user", "mic", text);
     thread_pool_send_text(text);
 }

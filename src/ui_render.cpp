@@ -2,6 +2,7 @@
 
 extern "C" {
 #include "../include/ai_engine.h"
+#include "../include/stt_engine.h"
 #include "../include/audio_capture.h"
 #include "../include/sys_monitor.h"
 }
@@ -42,6 +43,8 @@ static float s_colorTarget[4] = {0, 212, 255, 255};
 static Font s_font;
 static bool s_font_loaded = false;
 static bool s_octagon_held = false;
+
+static volatile char s_transcript[4096] = "";
 
 /* Turkish character codepoints (UTF-16) */
 #define FONT_CP_CNT (256 + 12)
@@ -194,7 +197,7 @@ static void draw_arc_reactor(AgentState state, float amplitude) {
     Color sqCol = held ? (Color){0,255,100,255} : cyan;
     float speedMult = held ? 4.0f : 1.0f;
     for (int i = 0; i < 4; i++) {
-        float rot = s_time * (0.4f + i * 0.15f) * speedMult + i * 22.5f;
+        float rot = s_time * (0.8f + i * 0.3f) * speedMult + i * 22.5f;
         float s = r_core * (1.0f - i * 0.18f);
         Vector2 c = {(float)cx, (float)cy};
         Color outline = (i == 0) ? alpha(sqCol, 80 + (int)(40 * sinf(s_time * 0.5f + i)))
@@ -340,13 +343,18 @@ static void draw_top_bar(void) {
     Color cyan_c = (Color){0,243,255,255};
     Color txt = (Color){180,220,255,200};
 
-    DrawRectangleLines(40, 20, 150, 20, alpha(cyan_c, 100));
-    DrawRectangle(40, 20, 5, 5, cyan_c);
-    DrawTextEx(s_font, "SAMPLE/RATE: OK Hz", (Vector2){50, 24}, 10, 1, cyan_c);
+    const char *stt_st = stt_engine_is_loaded() ? "STT: READY" : "STT: MISSING";
+    const char *ai_st  = ai_engine_is_loaded()  ? "AI:  READY" : "AI:  OFFLINE";
+    Color stt_c = stt_engine_is_loaded() ? cyan_c : (Color){255, 80, 80, 220};
+    Color ai_c  = ai_engine_is_loaded()  ? cyan_c : (Color){255, 80, 80, 220};
 
-    DrawRectangleLines(200, 20, 150, 20, alpha(cyan_c, 100));
-    DrawRectangle(200, 20, 5, 5, cyan_c);
-    DrawTextEx(s_font, "BITRATE: 0 MBPS", (Vector2){210, 24}, 10, 1, cyan_c);
+    DrawRectangleLines(40, 20, 150, 20, alpha(stt_c, 150));
+    DrawRectangle(40, 20, 5, 5, stt_c);
+    DrawTextEx(s_font, stt_st, (Vector2){50, 24}, 10, 1, stt_c);
+
+    DrawRectangleLines(200, 20, 150, 20, alpha(ai_c, 150));
+    DrawRectangle(200, 20, 5, 5, ai_c);
+    DrawTextEx(s_font, ai_st, (Vector2){210, 24}, 10, 1, ai_c);
 
     int rx = s_width - 190;
     DrawRectangleLines(rx, 20, 150, 20, alpha(cyan_c, 100));
@@ -385,6 +393,20 @@ static void draw_quick_status(void) {
 }
 
 /* ── Overlay ── */
+static void draw_transcript(void) {
+    char txt[4096];
+    strncpy(txt, (const char*)s_transcript, sizeof(txt) - 1);
+    if (!txt[0]) return;
+
+    Vector2 sz = MeasureTextEx(s_font, txt, 20, 1);
+    int px = (s_width - (int)sz.x) / 2;
+    int py = s_height - 80;
+    DrawRectangle(px - 10, py - 6, (int)sz.x + 20, (int)sz.y + 12,
+                  (Color){0, 0, 0, 160});
+    DrawTextEx(s_font, txt, (Vector2){(float)px, (float)py}, 20, 1,
+               (Color){0, 255, 100, 220});
+}
+
 static void draw_overlay(void) {
     if (!s_overlay_active) return;
     DrawRectangle(0, 0, s_width, s_height, (Color){0,0,0,180});
@@ -598,6 +620,7 @@ void ui_render_frame(AgentState state, float amplitude) {
     draw_quick_status();
     draw_top_bar();
     draw_footer();
+    draw_transcript();
     draw_overlay();
 
     EndDrawing();
@@ -622,6 +645,10 @@ void ui_render_set_context_label(const char *label) {
 
 void ui_render_set_profile_label(const char *label) {
     strncpy(s_profileLabel, label, sizeof(s_profileLabel) - 1);
+}
+
+void ui_render_set_transcript(const char *text) {
+    strncpy((char*)s_transcript, text ? text : "", sizeof(s_transcript) - 1);
 }
 
 void ui_render_set_task_strip(const char *tasks) {
