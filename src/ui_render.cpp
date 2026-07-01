@@ -12,11 +12,6 @@ extern "C" {
 #include <cmath>
 #include <cstring>
 #include "raylib.h"
-#include "imgui.h"
-#include "imgui_impl_raylib.h"
-
-#define MAX_CHAT_LINES 256
-#define MAX_CHAT_LINE_LEN 512
 
 static int s_width = 1280;
 static int s_height = 720;
@@ -24,15 +19,8 @@ static bool s_shouldClose = false;
 
 static char s_contextLabel[256] = "";
 static char s_profileLabel[512] = "";
-static char s_task_strip[1024] = "";
 static char s_input_buf[512] = "";
 static bool s_input_pending;
-
-static char s_chatBuffer[MAX_CHAT_LINES][MAX_CHAT_LINE_LEN];
-static int s_chatCount = 0;
-static int s_chatHead = 0;
-static bool s_chatScrolled = false;
-static ImGuiTextFilter s_chatFilter;
 
 static bool s_overlay_active;
 static char s_overlay_title[128];
@@ -63,14 +51,6 @@ static void state_color_rgba(AgentState state, float out[4]) {
     }
 }
 
-static void chat_push(const char *msg) {
-    strncpy(s_chatBuffer[s_chatHead], msg, MAX_CHAT_LINE_LEN - 1);
-    s_chatBuffer[s_chatHead][MAX_CHAT_LINE_LEN - 1] = '\0';
-    s_chatHead = (s_chatHead + 1) % MAX_CHAT_LINES;
-    if (s_chatCount < MAX_CHAT_LINES) s_chatCount++;
-    s_chatScrolled = true;
-}
-
 static void waveform_push(float amplitude) {
     s_waveform[s_wavePos] = amplitude;
     s_wavePos = (s_wavePos + 1) % WAVE_LEN;
@@ -90,15 +70,44 @@ static Color alpha(Color c, int a) {
     return c;
 }
 
+static void draw_vignette(void) {
+    Color outer = (Color){8, 12, 20, 255};
+    Color inner = (Color){8, 12, 20, 0};
+    int cx = s_width / 2, cy = s_height / 2;
+    int radius = (s_width > s_height ? s_width : s_height) / 2;
+    DrawCircleGradient(cx, cy, (float)radius, inner, outer);
+}
+
+static void draw_scanlines(void) {
+    for (int y = 0; y < s_height; y += 4) {
+        DrawLine(0, y, s_width, y, (Color){0, 0, 0, 20});
+    }
+}
+
 static void draw_grid(void) {
-    Color grid_col = (Color){0, 212, 255, 6};
+    Color grid_col = (Color){0, 212, 255, 5};
     for (int x = 0; x < s_width; x += 40)
         DrawLine(x, 0, x, s_height, grid_col);
     for (int y = 0; y < s_height; y += 40)
         DrawLine(0, y, s_width, y, grid_col);
+    for (int x = 0; x < s_width; x += 160) {
+        DrawLine(x, 0, x, s_height, (Color){0, 212, 255, 10});
+    }
+    for (int y = 0; y < s_height; y += 160) {
+        DrawLine(0, y, s_width, y, (Color){0, 212, 255, 10});
+    }
 }
 
-/* ── Arc Reactor + Rotary Menu + Outer Indicators ── */
+static void draw_panel_bg(int x, int y, int w, int h) {
+    DrawRectangle(x, y, w, h, (Color){8, 12, 20, 210});
+    DrawRectangleLinesEx((Rectangle){(float)x, (float)y, (float)w, (float)h}, 1, (Color){0, 212, 255, 25});
+    DrawLine(x + 2, y + 2, x + 16, y + 2, (Color){0, 212, 255, 60});
+    DrawLine(x + 2, y + 2, x + 2, y + 16, (Color){0, 212, 255, 60});
+    DrawLine(x + w - 3, y + 2, x + w - 17, y + 2, (Color){0, 212, 255, 60});
+    DrawLine(x + 2, y + h - 3, x + 2, y + h - 17, (Color){0, 212, 255, 60});
+}
+
+/* ── Octagon Core + Rotary Menu + Outer Indicators ── */
 static void draw_arc_reactor(AgentState state, float amplitude) {
     int cx = s_width / 2;
     int cy = 190;
@@ -116,14 +125,14 @@ static void draw_arc_reactor(AgentState state, float amplitude) {
     Color ac_col = color_from_state(s_colorLerp);
 
     /* Outer glow */
-    DrawCircleGradient(cx, cy, 180, alpha(ac_col, 8), (Color){0,0,0,0});
+    DrawCircleGradient(cx, cy, 200, alpha(ac_col, 10), (Color){0,0,0,0});
 
-    /* Outer indicator ring — 8 dots for FPS, tokens/s, ctx%, CPU, RAM, Disk, Mic, Battery */
+    /* Outer indicator ring — 8 dots */
     {
         float vals[8];
         vals[0] = GetFPS() / 60.0f;
         vals[1] = ai_engine_tokens_per_sec() / 50.0f;
-        vals[2] = ai_engine_context_usage();
+        vals[2] = ai_engine_context_usage() / 100.0f;
         vals[3] = s_sys.cpu_percent / 100.0f;
         vals[4] = s_sys.ram_total_mb ? (float)s_sys.ram_used_mb / (float)s_sys.ram_total_mb : 0;
         vals[5] = s_sys.disk_total_mb ? 1.0f - (float)s_sys.disk_free_mb / (float)s_sys.disk_total_mb : 0;
@@ -132,24 +141,34 @@ static void draw_arc_reactor(AgentState state, float amplitude) {
 
         const char *labels[8] = {"FPS", "T/S", "CTX", "CPU", "RAM", "DSK", "MIC", "BAT"};
         for (int i = 0; i < 8; i++) {
-            float angle = (float)i * 3.14159f / 4.0f + s_time * 0.01f;
-            float dx = cosf(angle) * 175.0f;
-            float dy = sinf(angle) * 175.0f;
+            float angle = (float)i * 3.14159f / 4.0f + s_time * 0.015f;
+            float dx = cosf(angle) * 195.0f;
+            float dy = sinf(angle) * 195.0f;
             float v = vals[i];
             Color dot_col;
-            if (v > 0.7f) dot_col = (Color){0, 220, 80, 200};
-            else if (v > 0.3f) dot_col = (Color){240, 200, 0, 200};
-            else dot_col = (Color){220, 40, 40, 200};
-            int r = 4 + (int)(v * 4);
+            if (v > 0.7f) dot_col = (Color){0, 220, 80, 220};
+            else if (v > 0.3f) dot_col = (Color){240, 200, 0, 220};
+            else dot_col = (Color){220, 40, 40, 220};
+            int r = 3 + (int)(v * 5);
             DrawCircle(cx + (int)dx, cy + (int)dy, (float)r, dot_col);
+            DrawCircleLines(cx + (int)dx, cy + (int)dy, (float)(r + 2), alpha(dot_col, 60));
             DrawText(labels[i], cx + (int)dx - 10, cy + (int)dy + 8, 8, alpha(ac_col, 150));
         }
     }
 
-    /* Rotary menu circle */
-    DrawCircleLines(cx, cy, 135.0f, alpha(ac_col, 30));
+    /* Outer rotating ring */
+    float ring_angle = s_time * 0.4f;
+    DrawCircleLines(cx, cy, 155.0f, alpha(ac_col, 20));
+    for (int i = 0; i < 12; i++) {
+        float a = ring_angle + (float)i * 3.14159f * 2.0f / 12.0f;
+        float dx = cosf(a) * 155.0f;
+        float dy = sinf(a) * 155.0f;
+        DrawCircle(cx + (int)dx, cy + (int)dy, 2.0f, alpha(ac_col, 80));
+    }
 
-    /* 6 rotary buttons */
+    /* Rotary menu ring */
+    DrawCircleLines(cx, cy, 135.0f, alpha(ac_col, 35));
+
     Vector2 mp = GetMousePosition();
     s_rotary_hover = -1;
     for (int i = 0; i < 6; i++) {
@@ -166,165 +185,154 @@ static void draw_arc_reactor(AgentState state, float amplitude) {
         DrawText(s_rotary_labels[i], (int)bx - 16, (int)by - 5, 9, btn_col);
     }
 
-    /* Inner glow ring */
-    DrawCircleGradient(cx, cy, 115, alpha(ac_col, 20), (Color){0,0,0,0});
+    /* Octagon core */
+    Vector2 oct[8];
+    float oct_r = 52.0f + amplitude * 4.0f;
+    for (int i = 0; i < 8; i++) {
+        float angle = (float)i * 3.14159f * 2.0f / 8.0f - 3.14159f / 2.0f;
+        oct[i].x = cx + cosf(angle) * oct_r;
+        oct[i].y = cy + sinf(angle) * oct_r;
+    }
+    DrawTriangleFan(oct, 8, alpha(ac_col, 45));
+    DrawPoly((Vector2){(float)cx, (float)cy}, 8, oct_r - 4, -90.0f, alpha(ac_col, 90));
+    DrawPolyLines((Vector2){(float)cx, (float)cy}, 8, oct_r - 4, -90.0f, alpha(ac_col, 200));
 
-    /* Triangle core (inverted) */
-    Vector2 t1 = {(float)cx, (float)(cy - 48)};
-    Vector2 t2 = {(float)(cx - 44), (float)(cy + 34)};
-    Vector2 t3 = {(float)(cx + 44), (float)(cy + 34)};
-    DrawTriangle(t1, t2, t3, alpha(ac_col, 180));
-    DrawTriangleLines(t1, t2, t3, alpha(ac_col, 220));
+    /* Inner octagon glow */
+    DrawCircleGradient(cx, cy, oct_r * 0.6f, (Color){255,255,255,180}, alpha(ac_col, 0));
 
-    /* Center glow */
-    DrawCircleGradient(cx, cy, 22, (Color){255,255,255,200}, alpha(ac_col, 0));
+    /* Inner ring */
+    DrawCircleLines(cx, cy, oct_r * 0.4f, alpha(ac_col, 80));
 
-    /* Amplitude pulse ring around triangle */
-    float pulse_r = 60.0f + amplitude * 20.0f;
-    DrawCircleLines(cx, cy, pulse_r, alpha(ac_col, 20 + (int)(amplitude * 40)));
+    /* Center dot */
+    DrawCircle(cx, cy, 6.0f, (Color){255,255,255,220});
+    DrawCircle(cx, cy, 10.0f, alpha(ac_col, 40));
 
-    /* Rotary menu click */
-    if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && s_rotary_hover >= 0)
+    /* Pulse ring around octagon */
+    float pulse_r = oct_r + 20.0f + amplitude * 15.0f;
+    DrawCircleLines(cx, cy, pulse_r, alpha(ac_col, 15 + (int)(amplitude * 30)));
+
+    if (s_rotary_hover >= 0 && IsMouseButtonPressed(MOUSE_LEFT_BUTTON))
         s_rotary_selected = s_rotary_hover;
 }
 
-/* ── Left Panel: CPU, RAM, Disk, Battery, Wave ── */
+/* ── Left Panel ── */
 static void draw_left_panel(void) {
-    int px = 0, py = 32, pw = 220;
+    int px = 10, py = 38, pw = 200, ph = s_height - py - 10;
+    draw_panel_bg(px, py, pw, ph);
 
-    Color bg_col = (Color){8, 12, 20, 200};
-    DrawRectangle(px, py, pw, s_height - py - 290, bg_col);
-    DrawLine(px + pw, py, px + pw, s_height - 290, (Color){0, 212, 255, 30});
-
-    int y = py + 8;
+    int y = py + 14;
     Color txt = (Color){180, 190, 200, 255};
     Color cyan_c = (Color){0, 212, 255, 255};
 
-    /* Waveform visual */
-    DrawText("AUDIO", px + 10, y, 10, cyan_c);
-    y += 14;
-    for (int i = 0; i < pw - 20; i++) {
-        int idx = (s_wavePos + i * WAVE_LEN / (pw - 20)) % WAVE_LEN;
-        int x0 = px + 10 + i;
-        int h = (int)(s_waveform[idx] * 30);
-        DrawLine(x0, y + 20 - h, x0, y + 20 + h, alpha(cyan_c, 60 + (int)(s_waveform[idx] * 100)));
+    DrawText("AUDIO", px + 12, y, 10, cyan_c);
+    y += 16;
+    for (int i = 0; i < pw - 36; i++) {
+        int idx = (s_wavePos + i * WAVE_LEN / (pw - 36)) % WAVE_LEN;
+        int x0 = px + 14 + i;
+        int h = (int)(s_waveform[idx] * 28);
+        DrawLine(x0, y + 18 - h, x0, y + 18 + h, alpha(cyan_c, 50 + (int)(s_waveform[idx] * 80)));
     }
-    y += 50;
+    y += 52;
 
-    /* CPU */
-    DrawText("CPU #1", px + 10, y, 10, cyan_c);
+    DrawText("CPU #1", px + 12, y, 10, cyan_c);
     float cpu = s_sys.cpu_percent;
-    DrawRectangle(px + 10, y + 14, pw - 20, 12, (Color){20, 30, 50, 200});
-    DrawRectangle(px + 10, y + 14, (int)((pw - 20) * cpu / 100.0f), 12,
-                  cpu > 80 ? (Color){220, 40, 40, 200} : (Color){0, 212, 255, 200});
+    DrawRectangle(px + 12, y + 14, pw - 24, 10, (Color){20, 30, 50, 200});
+    DrawRectangle(px + 12, y + 14, (int)((pw - 24) * cpu / 100.0f), 10,
+                  cpu > 80 ? (Color){220, 40, 40, 220} : (Color){0, 212, 255, 220});
     char cpu_txt[32]; snprintf(cpu_txt, sizeof(cpu_txt), "%.0f%%", cpu);
-    DrawText(cpu_txt, px + pw - 50, y, 10, txt);
-    y += 36;
+    DrawText(cpu_txt, px + pw - 40, y, 10, txt);
+    y += 34;
 
-    /* RAM */
-    DrawText("RAM", px + 10, y, 10, cyan_c);
+    DrawText("RAM", px + 12, y, 10, cyan_c);
     float ram_pct = s_sys.ram_total_mb ? (float)s_sys.ram_used_mb / (float)s_sys.ram_total_mb : 0;
-    DrawRectangle(px + 10, y + 14, pw - 20, 12, (Color){20, 30, 50, 200});
-    DrawRectangle(px + 10, y + 14, (int)((pw - 20) * ram_pct), 12,
-                  ram_pct > 0.85f ? (Color){220, 40, 40, 200} : (Color){123, 47, 190, 200});
-    char ram_txt[64]; snprintf(ram_txt, sizeof(ram_txt), "%llu / %llu MB", s_sys.ram_used_mb, s_sys.ram_total_mb);
-    DrawText(ram_txt, px + 10, y + 28, 9, txt);
-    y += 50;
+    DrawRectangle(px + 12, y + 14, pw - 24, 10, (Color){20, 30, 50, 200});
+    DrawRectangle(px + 12, y + 14, (int)((pw - 24) * ram_pct), 10,
+                  ram_pct > 0.85f ? (Color){220, 40, 40, 220} : (Color){123, 47, 190, 220});
+    char ram_txt[64]; snprintf(ram_txt, sizeof(ram_txt), "%llu / %llu", s_sys.ram_used_mb, s_sys.ram_total_mb);
+    DrawText(ram_txt, px + 12, y + 28, 9, txt);
+    y += 48;
 
-    /* Disk */
-    DrawText("DRIVE #1 'C:'", px + 10, y, 10, cyan_c);
+    DrawText("DRIVE #1", px + 12, y, 10, cyan_c);
     float disk_pct = s_sys.disk_total_mb ? 1.0f - (float)s_sys.disk_free_mb / (float)s_sys.disk_total_mb : 0;
-    DrawRectangle(px + 10, y + 14, pw - 20, 12, (Color){20, 30, 50, 200});
-    DrawRectangle(px + 10, y + 14, (int)((pw - 20) * disk_pct), 12,
-                  disk_pct > 0.9f ? (Color){220, 40, 40, 200} : (Color){0, 200, 180, 200});
-    char disk_txt[64]; snprintf(disk_txt, sizeof(disk_txt), "%llu / %llu MB free",
-                                s_sys.disk_free_mb, s_sys.disk_total_mb);
-    DrawText(disk_txt, px + 10, y + 28, 9, txt);
-    y += 50;
+    DrawRectangle(px + 12, y + 14, pw - 24, 10, (Color){20, 30, 50, 200});
+    DrawRectangle(px + 12, y + 14, (int)((pw - 24) * disk_pct), 10,
+                  disk_pct > 0.9f ? (Color){220, 40, 40, 220} : (Color){0, 200, 180, 220});
+    char disk_txt[64]; snprintf(disk_txt, sizeof(disk_txt), "%llu MB free", s_sys.disk_free_mb);
+    DrawText(disk_txt, px + 12, y + 28, 9, txt);
+    y += 48;
 
-    /* Battery */
-    DrawText("POWER", px + 10, y, 10, cyan_c);
+    DrawText("POWER", px + 12, y, 10, cyan_c);
     y += 16;
     if (s_sys.battery_percent >= 0) {
-        Color bat_col = s_sys.battery_percent > 20 ? (Color){0, 212, 255, 200} : (Color){220, 40, 40, 200};
-        DrawRectangle(px + 10, y, 60, 20, (Color){30, 40, 60, 200});
-        DrawRectangleLines(px + 10, y, 60, 20, bat_col);
-        DrawRectangle(px + 70, y + 6, 4, 8, bat_col);
-        int fill_w = (int)(56 * s_sys.battery_percent / 100.0f);
-        DrawRectangle(px + 12, y + 2, fill_w, 16, alpha(bat_col, 180));
+        Color bat_col = s_sys.battery_percent > 20 ? (Color){0, 212, 255, 220} : (Color){220, 40, 40, 220};
+        DrawRectangle(px + 12, y, 56, 18, (Color){30, 40, 60, 200});
+        DrawRectangleLines(px + 12, y, 56, 18, bat_col);
+        DrawRectangle(px + 68, y + 5, 4, 8, bat_col);
+        int fill_w = (int)(52 * s_sys.battery_percent / 100.0f);
+        DrawRectangle(px + 14, y + 2, fill_w, 14, alpha(bat_col, 160));
         char bat_txt[16]; snprintf(bat_txt, sizeof(bat_txt), "%d%%", s_sys.battery_percent);
-        DrawText(bat_txt, px + 24, y + 3, 10, WHITE);
-        DrawText(s_sys.ac_power ? "AC" : "BAT", px + 80, y + 3, 9, txt);
+        DrawText(bat_txt, px + 22, y + 2, 10, WHITE);
+        DrawText(s_sys.ac_power ? "AC" : "BAT", px + 80, y + 2, 9, txt);
     } else {
-        DrawText("Desktop / No Battery", px + 10, y, 9, txt);
+        DrawText("Desktop", px + 12, y, 9, txt);
     }
     y += 30;
 
-    /* Network */
-    DrawText("NETWORK", px + 10, y, 10, cyan_c);
-    DrawText(s_sys.ip_addr[0] ? s_sys.ip_addr : "No IP", px + 10, y + 14, 9, txt);
+    DrawText("NETWORK", px + 12, y, 10, cyan_c);
+    DrawText(s_sys.ip_addr[0] ? s_sys.ip_addr : "No IP", px + 12, y + 14, 9, txt);
 }
 
-/* ── Right Panel: Time, Uptime, LLM, Context ── */
+/* ── Right Panel ── */
 static void draw_right_panel(void) {
-    int pw = 220;
-    int px = s_width - pw, py = 32;
+    int pw = 200;
+    int px = s_width - pw - 10, py = 38, ph = s_height - py - 10;
+    draw_panel_bg(px, py, pw, ph);
 
-    Color bg_col = (Color){8, 12, 20, 200};
-    DrawRectangle(px, py, pw, s_height - py - 290, bg_col);
-    DrawLine(px, py, px, s_height - 290, (Color){0, 212, 255, 30});
-
-    int y = py + 8;
+    int y = py + 14;
     Color txt = (Color){180, 190, 200, 255};
     Color cyan_c = (Color){0, 212, 255, 255};
 
-    /* Digital Clock */
-    DrawText(s_sys.time_str, px + 10, y, 28, cyan_c);
+    DrawText(s_sys.time_str, px + 12, y, 28, cyan_c);
     y += 36;
-    DrawText(s_sys.date_str, px + 10, y, 10, txt);
+    DrawText(s_sys.date_str, px + 12, y, 10, txt);
     y += 22;
 
-    /* Uptime */
-    DrawText("UPTIME", px + 10, y, 10, cyan_c);
+    DrawText("UPTIME", px + 12, y, 10, cyan_c);
     unsigned long long up = s_sys.uptime_sec;
     int d = (int)(up / 86400); up %= 86400;
     int h = (int)(up / 3600); up %= 3600;
     int m = (int)(up / 60); int sec = (int)(up % 60);
     char uptime_txt[64];
     snprintf(uptime_txt, sizeof(uptime_txt), "%dd %02d:%02d:%02d", d, h, m, sec);
-    DrawText(uptime_txt, px + 10, y + 14, 9, txt);
+    DrawText(uptime_txt, px + 12, y + 14, 9, txt);
     y += 36;
 
-    /* Recycle Bin */
-    DrawText("RECYCLE BIN", px + 10, y, 10, cyan_c);
+    DrawText("RECYCLE", px + 12, y, 10, cyan_c);
     char recyc_txt[32]; snprintf(recyc_txt, sizeof(recyc_txt), "%d items", s_sys.recycle_count);
-    DrawText(recyc_txt, px + 10, y + 14, 9, txt);
+    DrawText(recyc_txt, px + 12, y + 14, 9, txt);
     y += 36;
 
-    /* LLM Status */
-    DrawText("LLM ENGINE", px + 10, y, 10, cyan_c);
+    DrawText("LLM ENGINE", px + 12, y, 10, cyan_c);
     y += 16;
     if (ai_engine_is_loaded()) {
         float tps = ai_engine_tokens_per_sec();
         int ctx = ai_engine_context_usage();
         char llm_txt[128];
         snprintf(llm_txt, sizeof(llm_txt), "Token/s: %.1f", tps);
-        DrawText(llm_txt, px + 10, y, 9, txt);
+        DrawText(llm_txt, px + 12, y, 9, txt);
         y += 14;
         snprintf(llm_txt, sizeof(llm_txt), "Context: %d%%", ctx);
-        DrawText(llm_txt, px + 10, y, 9, ctx > 80 ? (Color){220,40,40,255} : txt);
+        DrawText(llm_txt, px + 12, y, 9, ctx > 80 ? (Color){220,40,40,255} : txt);
         y += 14;
-        DrawText("Status: Ready", px + 10, y, 9, (Color){0, 220, 80, 255});
+        DrawText("Ready", px + 12, y, 9, (Color){0, 220, 80, 255});
     } else {
-        DrawText("Status: Not loaded", px + 10, y, 9, (Color){220, 40, 40, 255});
+        DrawText("Not loaded", px + 12, y, 9, (Color){220, 40, 40, 255});
     }
     y += 30;
 
-    /* Active context */
-    DrawText("CONTEXT", px + 10, y, 10, cyan_c);
+    DrawText("CONTEXT", px + 12, y, 10, cyan_c);
     y += 14;
     if (s_contextLabel[0]) {
-        int ctx_y = y;
         const char *p = s_contextLabel;
         char line[128];
         while (*p) {
@@ -332,109 +340,73 @@ static void draw_right_panel(void) {
             while (*p && i < (int)sizeof(line) - 1 && *p != '\n') line[i++] = *p++;
             line[i] = '\0';
             if (*p == '\n') p++;
-            DrawText(line, px + 10, ctx_y, 9, txt);
-            ctx_y += 12;
+            DrawText(line, px + 12, y, 9, txt);
+            y += 12;
+            if (y > py + ph - 20) break;
         }
     } else {
-        DrawText("(no active context)", px + 10, y, 9, txt);
+        DrawText("(none)", px + 12, y, 9, txt);
     }
 }
 
 /* ── Top Bar ── */
 static void draw_top_bar(void) {
     Color cyan_c = (Color){0, 212, 255, 255};
-    Color txt = (Color){180, 190, 200, 255};
+    DrawRectangle(0, 0, s_width, 32, (Color){8, 12, 20, 235});
+    DrawLine(0, 32, s_width, 32, (Color){0, 212, 255, 25});
+    DrawLine(0, 33, s_width, 33, (Color){0, 212, 255, 8});
 
-    DrawRectangle(0, 0, s_width, 30, (Color){8, 12, 20, 230});
-    DrawLine(0, 30, s_width, 30, alpha(cyan_c, 30));
-
-    DrawText("WINALP OS  v1.0.0", 10, 6, 14, cyan_c);
-
-    if (s_profileLabel[0]) {
-        int x = s_width - 20 - (int)strlen(s_profileLabel) * 8;
-        DrawText(s_profileLabel, x > 10 ? x : 10, 8, 11, txt);
-    }
-    DrawText("User:", s_width - 220, 8, 11, txt);
+    DrawText("WINALP OS  v1.0.0", 14, 8, 14, cyan_c);
     DrawText(s_profileLabel[0] ? s_profileLabel : "Alperen Colgecen",
-             s_width - 170, 8, 11, cyan_c);
+             s_width - 170, 9, 11, cyan_c);
+    DrawText("User:", s_width - 220, 9, 11, (Color){180, 190, 200, 255});
 }
 
 /* ── Footer ── */
 static void draw_footer(void) {
-    Color cyan_c = (Color){0, 212, 255, 100};
-    int fy = s_height - 30;
-    DrawRectangle(0, fy, s_width, 30, (Color){8, 12, 20, 230});
-    DrawLine(0, fy, s_width, fy, alpha(cyan_c, 20));
+    Color cyan_c = (Color){0, 212, 255, 90};
+    int fy = s_height - 28;
+    DrawRectangle(0, fy, s_width, 28, (Color){8, 12, 20, 230});
+    DrawLine(0, fy, s_width, fy, (Color){0, 212, 255, 15});
 
-    const char *label = "WINALP  |  STARK INDUSTRIES";
-    int fw = MeasureText(label, 14);
-    DrawText(label, (s_width - fw) / 2, fy + 7, 14, cyan_c);
+    const char *label = "WINALP  |  COLGECEN TECHNOLOGIES";
+    int fw = MeasureText(label, 12);
+    DrawText(label, (s_width - fw) / 2, fy + 7, 12, cyan_c);
+
+    DrawText("v1.0.0", 14, fy + 7, 10, (Color){0, 212, 255, 40});
 }
 
-/* ── Chat (ImGui) ── */
-static void draw_chat(void) {
-    int chat_y = s_height - 290;
-    int chat_h = 260;
-
-    ImGui::SetNextWindowPos(ImVec2(0, (float)chat_y), ImGuiCond_Always);
-    ImGui::SetNextWindowSize(ImVec2((float)s_width, (float)chat_h), ImGuiCond_Always);
-    ImGui::SetNextWindowBgAlpha(0.85f);
-    ImGui::Begin("##chat", NULL,
-        ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
-        ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus);
-
-    if (ImGui::SmallButton("Clear")) { s_chatCount = 0; s_chatHead = 0; }
-    ImGui::SameLine();
-    s_chatFilter.Draw("Filter", 180);
-
-    ImGui::Separator();
-    ImGui::BeginChild("##chatscroll", ImVec2(0, -ImGui::GetFrameHeightWithSpacing() - 4),
-                      false, ImGuiWindowFlags_NoNavFocus);
-    if (s_chatCount > 0) {
-        int start = (s_chatCount < MAX_CHAT_LINES) ? 0 : s_chatHead;
-        int count = (s_chatCount < MAX_CHAT_LINES) ? s_chatCount : MAX_CHAT_LINES;
-        for (int i = 0; i < count; i++) {
-            int idx = (start + i) % MAX_CHAT_LINES;
-            if (s_chatBuffer[idx][0] && s_chatFilter.PassFilter(s_chatBuffer[idx]))
-                ImGui::TextUnformatted(s_chatBuffer[idx]);
-        }
-        if (s_chatScrolled) {
-            ImGui::SetScrollHereY(1.0f);
-            s_chatScrolled = false;
-        }
-    } else {
-        ImGui::TextDisabled("No messages yet. Type below to chat.");
-    }
-    ImGui::EndChild();
-
-    ImGui::PushItemWidth(-1.0f);
-    if (ImGui::InputText("##input", s_input_buf, sizeof(s_input_buf),
-                         ImGuiInputTextFlags_EnterReturnsTrue)) {
-        s_input_pending = true;
-    }
-    ImGui::PopItemWidth();
-    ImGui::End();
+/* ── Quick Status (minimal center-bottom overlay) ── */
+static void draw_quick_status(void) {
+    Color txt = (Color){150, 160, 170, 180};
+    char buf[128];
+    snprintf(buf, sizeof(buf), "FPS: %d  |  CPU: %.0f%%  |  RAM: %llu MB",
+             GetFPS(), s_sys.cpu_percent, s_sys.ram_used_mb);
+    int fw = MeasureText(buf, 10);
+    DrawText(buf, (s_width - fw) / 2, s_height - 48, 10, txt);
 }
 
 /* ── Overlay ── */
 static void draw_overlay(void) {
     if (!s_overlay_active) return;
-    DrawRectangle(0, 0, s_width, s_height, (Color){0, 0, 0, 120});
+    DrawRectangle(0, 0, s_width, s_height, (Color){0, 0, 0, 140});
 
     int mw = 400, mh = 150;
     int mx = (s_width - mw) / 2, my = (s_height - mh) / 2;
-    DrawRectangle(mx, my, mw, mh, (Color){15, 25, 40, 230});
-    DrawRectangleLines(mx, my, mw, mh, (Color){0, 212, 255, 80});
+    DrawRectangle(mx, my, mw, mh, (Color){10, 20, 35, 240});
+    DrawRectangleLines(mx, my, mw, mh, (Color){0, 212, 255, 60});
+    DrawLine(mx + 2, my + 2, mx + 16, my + 2, (Color){0, 212, 255, 100});
+    DrawLine(mx + 2, my + 2, mx + 2, my + 16, (Color){0, 212, 255, 100});
 
     DrawText(s_overlay_title, mx + 20, my + 15, 18, (Color){0, 212, 255, 255});
     DrawText(s_overlay_msg, mx + 20, my + 45, 14, (Color){180, 190, 200, 255});
 
     Rectangle yBtn = {(float)(mx + 80), (float)(my + 100), 100, 30};
-    DrawRectangleRec(yBtn, (Color){0, 180, 80, 200});
+    DrawRectangleRounded(yBtn, 0.2f, 4, (Color){0, 180, 80, 220});
     DrawText("YES", (int)yBtn.x + 30, (int)yBtn.y + 6, 14, WHITE);
 
     Rectangle nBtn = {(float)(mx + 220), (float)(my + 100), 100, 30};
-    DrawRectangleRec(nBtn, (Color){180, 40, 40, 200});
+    DrawRectangleRounded(nBtn, 0.2f, 4, (Color){180, 40, 40, 220});
     DrawText("NO", (int)nBtn.x + 32, (int)nBtn.y + 6, 14, WHITE);
 
     if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
@@ -550,6 +522,9 @@ bool ui_render_confirm_blocking(const char *title, const char *msg) {
     while (s_overlay_active && !WindowShouldClose()) {
         BeginDrawing();
         ClearBackground((Color){8, 12, 20, 255});
+        draw_vignette();
+        draw_grid();
+        draw_scanlines();
         draw_overlay();
         EndDrawing();
     }
@@ -584,14 +559,6 @@ void ui_render_init(int width, int height, const char *title) {
         UnloadImage(iconImg);
     }
 
-    ImGui_ImplRaylib_Init(width, height);
-
-    ImGuiStyle& style = ImGui::GetStyle();
-    style.WindowRounding = 4.0f;
-    style.Colors[ImGuiCol_WindowBg] = ImVec4(0.03f, 0.05f, 0.08f, 0.85f);
-    style.Colors[ImGuiCol_Text] = ImVec4(0.80f, 0.85f, 0.90f, 1.00f);
-
-    chat_push("[system] WinAlp HUD initialized");
     winalp_log(WINALP_LOG_INFO, "UI initialized: %dx%d", width, height);
 }
 
@@ -607,21 +574,20 @@ void ui_render_frame(AgentState state, float amplitude) {
     waveform_push(amplitude);
     sys_monitor_poll(&s_sys);
 
-    ImGui_ImplRaylib_NewFrame();
-
     BeginDrawing();
     ClearBackground((Color){8, 12, 20, 255});
 
+    draw_vignette();
     draw_grid();
+    draw_scanlines();
     draw_left_panel();
     draw_right_panel();
     draw_arc_reactor(state, amplitude);
-    draw_chat();
+    draw_quick_status();
     draw_top_bar();
     draw_footer();
     draw_overlay();
 
-    ImGui_ImplRaylib_RenderDrawData();
     EndDrawing();
 }
 
@@ -630,17 +596,13 @@ bool ui_render_should_close(void) {
 }
 
 void ui_render_shutdown(void) {
-    ImGui_ImplRaylib_Shutdown();
     CloseWindow();
 }
 
 void ui_render_push_chat(const char *role, const char *text, const char *source_icon) {
-    char buf[MAX_CHAT_LINE_LEN];
-    if (source_icon && source_icon[0])
-        snprintf(buf, sizeof(buf), "[%s][%s] %s", source_icon, role, text);
-    else
-        snprintf(buf, sizeof(buf), "[%s] %s", role, text);
-    chat_push(buf);
+    (void)role;
+    (void)text;
+    (void)source_icon;
 }
 
 void ui_render_set_context_label(const char *label) {
@@ -652,7 +614,7 @@ void ui_render_set_profile_label(const char *label) {
 }
 
 void ui_render_set_task_strip(const char *tasks) {
-    strncpy(s_task_strip, tasks, sizeof(s_task_strip) - 1);
+    (void)tasks;
 }
 
 void ui_render_set_theme_float(const char *key, float value) {
