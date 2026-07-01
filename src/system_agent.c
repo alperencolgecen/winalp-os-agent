@@ -136,15 +136,22 @@ static void exec_action(const char *json) {
     snprintf(full, sizeof(full), "%s\\%s", SANDBOX_ROOT, path);
 
     if (strcmp(action, "create_file") == 0) {
+        /* ensure parent dirs via Windows API */
         char dir[MAX_PATH];
         snprintf(dir, sizeof(dir), "%s\\%s", SANDBOX_ROOT, path);
         for (char *p = dir + strlen(SANDBOX_ROOT) + 1; *p; p++)
-            if (*p == '\\') { *p = '\0'; CreateDirectory(dir, NULL); *p = '\\'; }
-        FILE *f = fopen(full, "w");
-        if (!f) { winalp_log(WINALP_LOG_ERROR, "agent: cannot write %s", full); return; }
-        if (content[0]) fputs(content, f);
-        fclose(f);
-        winalp_log(WINALP_LOG_INFO, "agent: created %s", full);
+            if (*p == '\\') { *p = '\0'; CreateDirectoryA(dir, NULL); *p = '\\'; }
+        /* write file via CreateFile/WriteFile */
+        HANDLE hFile = CreateFileA(full, GENERIC_WRITE, 0, NULL,
+                                    CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (hFile == INVALID_HANDLE_VALUE) {
+            winalp_log(WINALP_LOG_ERROR, "agent: cannot write %s", full);
+            return;
+        }
+        DWORD written;
+        WriteFile(hFile, content, (DWORD)strlen(content), &written, NULL);
+        CloseHandle(hFile);
+        winalp_log(WINALP_LOG_INFO, "agent: created %s (%lu bytes)", full, written);
 
     } else if (strcmp(action, "create_dir") == 0) {
         if (CreateDirectory(full, NULL) || GetLastError() == ERROR_ALREADY_EXISTS)
@@ -153,11 +160,16 @@ static void exec_action(const char *json) {
             winalp_log(WINALP_LOG_ERROR, "agent: cannot create dir %s", full);
 
     } else if (strcmp(action, "read_file") == 0) {
-        FILE *f = fopen(full, "r");
-        if (!f) { winalp_log(WINALP_LOG_WARN, "agent: cannot read %s", full); return; }
-        char tmp[BUF_SZ]; size_t n = fread(tmp, 1, sizeof(tmp) - 1, f);
-        tmp[n] = '\0'; fclose(f);
-        winalp_log(WINALP_LOG_INFO, "agent: read %s (%zu bytes)", full, n);
+        HANDLE hFile = CreateFileA(full, GENERIC_READ, FILE_SHARE_READ, NULL,
+                                    OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (hFile == INVALID_HANDLE_VALUE) {
+            winalp_log(WINALP_LOG_WARN, "agent: cannot read %s", full);
+            return;
+        }
+        char tmp[BUF_SZ]; DWORD n;
+        if (!ReadFile(hFile, tmp, BUF_SZ - 1, &n, NULL)) n = 0;
+        tmp[n] = '\0'; CloseHandle(hFile);
+        winalp_log(WINALP_LOG_INFO, "agent: read %s (%lu bytes)", full, n);
 
     } else if (strcmp(action, "delete_file") == 0) {
         char desc[128]; snprintf(desc, sizeof(desc), "Delete file: %s", full);
