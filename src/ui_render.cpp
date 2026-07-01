@@ -190,13 +190,16 @@ static void draw_arc_reactor(AgentState state, float amplitude) {
     float r_core = 90.0f + amplitude * 10.0f;
     DrawCircleGradient(cx, cy, r_core * 1.5f, alpha(col, 80), (Color){0,0,0,0});
     
+    bool held = s_octagon_held;
+    Color sqCol = held ? (Color){0,255,100,255} : cyan;
+    float speedMult = held ? 4.0f : 1.0f;
     for (int i = 0; i < 4; i++) {
-        float rot = s_time * (0.4f + i * 0.15f) + i * 22.5f;
+        float rot = s_time * (0.4f + i * 0.15f) * speedMult + i * 22.5f;
         float s = r_core * (1.0f - i * 0.18f);
         Vector2 c = {(float)cx, (float)cy};
-        Color outline = (i == 0) ? alpha(cyan, 80 + (int)(40 * sinf(s_time * 0.5f + i)))
-                                 : alpha(cyan, 120 - i * 25);
-        Color fill    = (i == 2) ? alpha(col, 50) : BLANK;
+        Color outline = (i == 0) ? alpha(sqCol, 80 + (int)(40 * sinf(s_time * 0.5f + i)))
+                                 : alpha(sqCol, 120 - i * 25);
+        Color fill = (i == 2) ? alpha(held ? (Color){0,255,100,80} : col, 50) : BLANK;
         if (fill.a > 0) DrawPoly(c, 4, s, rot, fill);
         DrawPolyLines(c, 4, s, rot, outline);
     }
@@ -233,7 +236,7 @@ static void draw_arc_reactor(AgentState state, float amplitude) {
     }
 
     if (s_octagon_held) {
-        DrawCircleLines(cx, cy, core_r + 30, alpha((Color){0,255,100,255}, 100 + (int)(sinf(s_time * 8) * 50)));
+        DrawCircleLines(cx, cy, core_r + 35, alpha((Color){0,255,100,255}, 80 + (int)(sinf(s_time * 8) * 50)));
     }
 }
 

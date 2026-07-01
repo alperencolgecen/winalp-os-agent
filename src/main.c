@@ -3,8 +3,10 @@
 #include <stdlib.h>
 #include <math.h>
 #include <time.h>
+#include <signal.h>
 
 #include "../include/winalp.h"
+#include "../include/logger.h"
 #include "../include/logger.h"
 #include "../include/ui_render.h"
 #include "../include/stt_engine.h"
@@ -52,11 +54,26 @@ static bool confirm_cb(const char *desc, void *ud) {
     return ui_render_confirm_blocking("WinAlp — Confirm Action", desc);
 }
 
+static LONG WINAPI crash_filter(EXCEPTION_POINTERS *ep) {
+    (void)ep;
+    winalp_log(WINALP_LOG_ERROR, "CRASH: unhandled exception — continuing");
+    return EXCEPTION_EXECUTE_HANDLER;
+}
+static void sig_handler(int sig) {
+    winalp_log(WINALP_LOG_ERROR, "CRASH: signal %d — continuing", sig);
+}
+
 int main(void) {
     winalp_log_init("winalp.log");
     srand((unsigned)time(NULL));
     winalp_log(WINALP_LOG_INFO, "WinAlp v%d.%d.%d starting...",
                WINALP_VERSION_MAJOR, WINALP_VERSION_MINOR, WINALP_VERSION_PATCH);
+
+    /* Install crash handlers to prevent unexpected exit */
+    SetUnhandledExceptionFilter(crash_filter);
+    signal(SIGSEGV, sig_handler);
+    signal(SIGABRT, sig_handler);
+    signal(SIGFPE,  sig_handler);
 
     memory_store_init("profile");
     memory_store_integrity_check();
@@ -146,10 +163,10 @@ int main(void) {
     }
 
     char selected_model[1024] = "";
-    if (n_models == 1) {
+    if (n_models == 1 && models[0].compat > 1) {
         strncpy(selected_model, models[0].path, sizeof(selected_model) - 1);
         winalp_log(WINALP_LOG_INFO, "model: auto-selected %s", selected_model);
-    } else if (n_models > 1) {
+    } else if (n_models > 0) {
         char *sel = ui_render_model_select(models, n_models);
         if (sel) {
             strncpy(selected_model, sel, sizeof(selected_model) - 1);

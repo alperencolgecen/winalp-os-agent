@@ -151,3 +151,16 @@ download-stt-model:
 	} else { \
 	    Write-Host 'Model already exists: $(WHISPER_MODEL_PATH)'; \
 	}"
+
+# ---------- Download small AI model (Qwen 2.5 1.5B Q4_K_M, ~1GB) ----------
+QWEN_MODEL_URL = https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf
+QWEN_MODEL_PATH = models/brain-model.gguf
+
+download-ai-model:
+	powershell -Command "if (-not (Test-Path '$(QWEN_MODEL_PATH)')) { \
+	    Write-Host 'Downloading Qwen 1.5B Q4_K_M (~1GB) ...'; \
+	    curl.exe -L -o '$(QWEN_MODEL_PATH)' '$(QWEN_MODEL_URL)'; \
+	    Write-Host 'Downloaded: $(QWEN_MODEL_PATH)'; \
+	} else { \
+	    Write-Host 'AI model already exists: $(QWEN_MODEL_PATH)'; \
+	}"
