@@ -5,6 +5,7 @@
 
 typedef void (*TokenCallback)(const char *token, void *userdata);
 
+void  ai_engine_set_system_prompt(const char *prompt);
 bool  ai_engine_load(const char *model_path, int n_gpu_layers);
 bool  ai_engine_load_auto(const char *model_path);
 bool  ai_engine_is_loaded(void);

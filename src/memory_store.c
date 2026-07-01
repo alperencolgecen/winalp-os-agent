@@ -28,6 +28,7 @@ static char s_conv[MAX_CONV][MAX_LINE];
 static int  s_conv_head, s_conv_count;
 
 /* Forward decl */
+static void json_escape_str(const char *in, char *out, size_t out_sz);
 static void ensure_dir(const char *dir);
 static void load_profile(void);
 static void save_profile(void);
@@ -70,9 +71,12 @@ bool memory_store_append_message(const char *role, const char *source,
     if (!s_init) return false;
     EnterCriticalSection(&s_lock);
     int idx = (s_conv_head + s_conv_count) % MAX_CONV;
+    char r_esc[256], s_esc[128], c_esc[MAX_LINE / 2];
+    json_escape_str(role ? role : "", r_esc, sizeof(r_esc));
+    json_escape_str(source ? source : "", s_esc, sizeof(s_esc));
+    json_escape_str(content ? content : "", c_esc, sizeof(c_esc));
     snprintf(s_conv[idx], MAX_LINE, "{\"role\":\"%s\",\"src\":\"%s\",\"msg\":\"%s\"}",
-             role ? role : "", source ? source : "",
-             content ? content : "");
+             r_esc, s_esc, c_esc);
     if (s_conv_count < MAX_CONV) s_conv_count++;
     else s_conv_head = (s_conv_head + 1) % MAX_CONV;
     LeaveCriticalSection(&s_lock);
@@ -335,6 +339,37 @@ bool memory_store_integrity_check(void) {
     return true;
 }
 
+/* JSON string escaping: inserts \ before " and \ */
+static void json_escape_str(const char *in, char *out, size_t out_sz) {
+    if (!in) { if (out_sz > 0) out[0] = '\0'; return; }
+    size_t oi = 0;
+    for (const char *p = in; *p && oi + 6 < out_sz; p++) {
+        if      (*p == '"')  { out[oi++] = '\\'; out[oi++] = '"'; }
+        else if (*p == '\\') { out[oi++] = '\\'; out[oi++] = '\\'; }
+        else if (*p == '\n') { out[oi++] = '\\'; out[oi++] = 'n'; }
+        else if (*p == '\r') { out[oi++] = '\\'; out[oi++] = 'r'; }
+        else if (*p == '\t') { out[oi++] = '\\'; out[oi++] = 't'; }
+        else                  out[oi++] = *p;
+    }
+    out[oi] = '\0';
+}
+
+/* Build a human-readable profile summary string from all stored KV pairs */
+bool memory_store_build_summary(char *out, int out_len) {
+    if (!out || out_len <= 0) return false;
+    EnterCriticalSection(&s_lock);
+    int pos = 0;
+    pos += snprintf(out + pos, (size_t)(out_len - pos), "Kullanici hakkinda bilinenler:\n");
+    for (int i = 0; i < s_nprofile && pos < out_len - 2; i++) {
+        char val_esc[1024];
+        json_escape_str(s_profile[i].val, val_esc, sizeof(val_esc));
+        pos += snprintf(out + pos, (size_t)(out_len - pos), "- %s: %s\n",
+                        s_profile[i].key, val_esc);
+    }
+    LeaveCriticalSection(&s_lock);
+    return pos > 0;
+}
+
 /* ---------- internal helpers ---------- */
 
 static void ensure_dir(const char *dir) {
@@ -423,8 +458,10 @@ static void save_profile(void) {
 
     APPEND("{\n");
     for (int i = 0; i < s_nprofile; i++) {
+        char val_esc[2048];
+        json_escape_str(s_profile[i].val, val_esc, sizeof(val_esc));
         APPEND("  \"%s\": \"%s\"%s\n",
-               s_profile[i].key, s_profile[i].val,
+               s_profile[i].key, val_esc,
                (i < s_nprofile - 1) ? "," : "");
     }
     APPEND("}\n");

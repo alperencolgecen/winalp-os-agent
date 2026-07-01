@@ -27,5 +27,6 @@ bool memory_store_integrity_check(void);
 
 /* DPAPI encryption toggle (default off) */
 void memory_store_set_encryption(bool enable);
+bool memory_store_build_summary(char *out, int out_len);
 
 #endif /* MEMORY_STORE_H */

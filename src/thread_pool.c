@@ -6,6 +6,7 @@
 #include "../include/vision_engine.h"
 #include "../include/memory_store.h"
 #include "../include/plugin_manager.h"
+#include "../include/prompt_engine.h"
 #include "../include/system_agent.h"
 #include "../include/thread_mutex.h"
 #include <windows.h>
@@ -115,11 +116,38 @@ static void on_ai_token(const char *token, void *ud) {
     }
 }
 
+/* Build and set the system prompt (profile + plugins + template) */
+static void rebuild_system_prompt(void) {
+    char profile_summary[2048] = "";
+    memory_store_build_summary(profile_summary, sizeof(profile_summary));
+
+    char *plugin_guide = plugin_manager_build_guide();
+
+    char *sys = prompt_engine_build(
+        profile_summary[0] ? profile_summary : NULL,
+        plugin_guide && plugin_guide[0] ? plugin_guide : NULL);
+    if (sys) {
+        ai_engine_set_system_prompt(sys);
+        free(sys);
+    } else {
+        ai_engine_set_system_prompt("You are WinAlp, a desktop AI assistant.");
+    }
+    free(plugin_guide);
+}
+
 static DWORD WINAPI ai_thread(LPVOID arg) {
     (void)arg;
     winalp_log(WINALP_LOG_INFO, "thread_pool: AI thread started");
 
+    /* Build system prompt once on start */
+    rebuild_system_prompt();
+
     while (s_running) {
+        /* Rebuild system prompt periodically (profile/plugins may change) */
+        static int rebuild_counter;
+        if (++rebuild_counter % 100 == 0)
+            rebuild_system_prompt();
+
         /* Wait for a transcript */
         char transcript[MSG_SIZE];
         if (!queue_pop(&s_transcript_q, transcript, sizeof(transcript))) {

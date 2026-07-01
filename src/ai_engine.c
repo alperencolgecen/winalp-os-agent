@@ -10,6 +10,10 @@ static struct llama_context *s_ctx   = NULL;
 static struct llama_sampler *s_smpl  = NULL;
 static int s_n_ctx = 0;
 
+/* System prompt (set once after model load) */
+#define MAX_SYS_PROMPT 16384
+static char s_system_prompt[MAX_SYS_PROMPT] = "";
+
 /* Sliding window conversation buffer */
 #define MAX_HISTORY 64
 #define MAX_HIST_LEN 4096
@@ -20,6 +24,10 @@ static int  s_ctx_usage_pct; /* last measured KV cache usage % */
 
 bool ai_engine_is_loaded(void) {
     return s_ctx != NULL && s_model != NULL;
+}
+
+void ai_engine_set_system_prompt(const char *prompt) {
+    strncpy(s_system_prompt, prompt ? prompt : "", sizeof(s_system_prompt) - 1);
 }
 
 /* Sliding window: trim memory when >70% full */
@@ -131,15 +139,40 @@ void ai_engine_infer(const char *prompt, TokenCallback cb, void *userdata) {
     /* Push user message to history */
     ai_engine_push_history("user", prompt);
 
+    /* Build composite prompt: system + history + user */
+    char composite[32768] = "";
+    int pos = 0;
+    int rem = (int)sizeof(composite);
+#define CP_APPEND(fmt, ...) do { \
+    int n = snprintf(composite + pos, (size_t)rem, fmt, ##__VA_ARGS__); \
+    if (n > 0 && n < rem) { pos += n; rem -= n; } \
+} while(0)
+
+    if (s_system_prompt[0])
+        CP_APPEND("%s\n\n", s_system_prompt);
+
+    /* Replay history (except the just-pushed user message which is included after) */
+    int n_hist = s_history_count - 1;
+    if (n_hist > 0) {
+        int idx = s_history_head;
+        for (int i = 0; i < n_hist; i++) {
+            CP_APPEND("%s\n", s_history[idx]);
+            idx = (idx + 1) % MAX_HISTORY;
+        }
+    }
+
+    CP_APPEND("User: %s\nAssistant: ", prompt ? prompt : "");
+#undef CP_APPEND
+
     const struct llama_vocab *vocab = llama_model_get_vocab(s_model);
 
-    int n_tokens = llama_tokenize(vocab, prompt, (int)strlen(prompt), NULL, 0, true, false);
+    int n_tokens = llama_tokenize(vocab, composite, pos, NULL, 0, true, false);
     if (n_tokens <= 0) return;
 
     llama_token *tokens = (llama_token*)malloc((size_t)n_tokens * sizeof(llama_token));
     if (!tokens) return;
 
-    llama_tokenize(vocab, prompt, (int)strlen(prompt), tokens, n_tokens, true, false);
+    llama_tokenize(vocab, composite, pos, tokens, n_tokens, true, false);
 
     struct llama_batch batch = llama_batch_get_one(tokens, n_tokens);
     if (llama_decode(s_ctx, batch) != 0) {
