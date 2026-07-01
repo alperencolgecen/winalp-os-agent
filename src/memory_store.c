@@ -118,8 +118,28 @@ bool memory_store_get_profile(const char *key, char *out, int out_len) {
 
 bool memory_store_upsert_task(const char *task_json) {
     if (!s_init || !task_json) return false;
-    char path[1024]; snprintf(path, sizeof(path), "%s\\tasks\\task_%lld.json",
-                              s_base, (long long)time(NULL));
+
+    /* Extract "id" field from JSON to use as filename */
+    char task_id[256] = {0};
+    const char *id_key = strstr(task_json, "\"id\"");
+    if (id_key) {
+        id_key = strchr(id_key, ':');
+        if (id_key) {
+            id_key++;
+            while (*id_key == ' ') id_key++;
+            if (*id_key == '"') {
+                id_key++;
+                int di = 0;
+                while (*id_key && *id_key != '"' && di < 255)
+                    task_id[di++] = *id_key++;
+                task_id[di] = '\0';
+            }
+        }
+    }
+    if (!task_id[0])
+        snprintf(task_id, sizeof(task_id), "task_%lld", (long long)time(NULL));
+
+    char path[1024]; snprintf(path, sizeof(path), "%s\\tasks\\%s.json", s_base, task_id);
     FILE *f = fopen(path, "w");
     if (!f) return false;
     fputs(task_json, f);

@@ -167,6 +167,12 @@ static void test_mem_store_tasks(void) {
 
     ASSERT(memory_store_get_tasks(buf, sizeof(buf)), "get tasks");
     ASSERT(strstr(buf, "test_001") != NULL, "task appears in list");
+
+    ASSERT(memory_store_update_task("test_001", "status", "done"), "update task");
+
+    ASSERT(memory_store_delete_task("test_001"), "delete task");
+    ASSERT(memory_store_get_tasks(buf, sizeof(buf)), "get tasks after delete");
+    ASSERT(strstr(buf, "test_001") == NULL, "task removed from list");
     PASS();
 }
 
