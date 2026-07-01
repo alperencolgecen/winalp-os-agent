@@ -9,8 +9,45 @@ static struct llama_context *s_ctx   = NULL;
 static struct llama_sampler *s_smpl  = NULL;
 static int s_n_ctx = 0;
 
+/* Sliding window conversation buffer */
+#define MAX_HISTORY 64
+#define MAX_HIST_LEN 4096
+static char s_history[MAX_HISTORY][MAX_HIST_LEN];
+static int  s_history_count;
+static int  s_history_head;
+static int  s_ctx_usage_pct; /* last measured KV cache usage % */
+
 bool ai_engine_is_loaded(void) {
     return s_ctx != NULL && s_model != NULL;
+}
+
+/* Sliding window: trim memory when >70% full */
+static void trim_context(void) {
+    if (!s_ctx) return;
+    llama_memory_t mem = llama_get_memory(s_ctx);
+    if (!mem) return;
+
+    llama_pos p_max = llama_memory_seq_pos_max(mem, 0);
+    if (p_max < 0) return;
+    s_ctx_usage_pct = (int)((p_max * 100) / s_n_ctx);
+    if (s_ctx_usage_pct < 70) return;
+
+    winalp_log(WINALP_LOG_INFO, "AI: context %d%% full — trimming sliding window", s_ctx_usage_pct);
+
+    /* Remove first half of positions */
+    llama_pos trim_at = p_max / 2;
+    llama_memory_seq_rm(mem, 0, 0, trim_at);
+    llama_memory_seq_add(mem, 0, trim_at, -1, -trim_at);
+    s_ctx_usage_pct = (int)((llama_memory_seq_pos_max(mem, 0) * 100) / s_n_ctx);
+    winalp_log(WINALP_LOG_INFO, "AI: context trimmed to %d%%", s_ctx_usage_pct);
+}
+
+/* Push a message into the sliding window history */
+void ai_engine_push_history(const char *role, const char *content) {
+    int idx = (s_history_head + s_history_count) % MAX_HISTORY;
+    snprintf(s_history[idx], MAX_HIST_LEN, "%s: %s", role ? role : "user", content ? content : "");
+    if (s_history_count < MAX_HISTORY) s_history_count++;
+    else s_history_head = (s_history_head + 1) % MAX_HISTORY;
 }
 
 bool ai_engine_load(const char *model_path, int n_gpu_layers) {
@@ -49,12 +86,22 @@ bool ai_engine_load(const char *model_path, int n_gpu_layers) {
     llama_sampler_chain_add(s_smpl, llama_sampler_init_temp(0.7f));
     llama_sampler_chain_add(s_smpl, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
 
+    s_history_count = 0;
+    s_history_head  = 0;
+    s_ctx_usage_pct = 0;
+
     winalp_log(WINALP_LOG_INFO, "AI: engine ready (ctx=%d)", s_n_ctx);
     return true;
 }
 
 void ai_engine_infer(const char *prompt, TokenCallback cb, void *userdata) {
     if (!s_ctx || !cb) return;
+
+    /* Trim context if too full */
+    trim_context();
+
+    /* Push user message to history */
+    ai_engine_push_history("user", prompt);
 
     const struct llama_vocab *vocab = llama_model_get_vocab(s_model);
 
@@ -77,6 +124,8 @@ void ai_engine_infer(const char *prompt, TokenCallback cb, void *userdata) {
     int n_gen = 0;
     const int max_gen = 512;
     char piece[32];
+    char response[4096] = "";
+    int resp_len = 0;
 
     while (n_gen < max_gen) {
         llama_sampler_reset(s_smpl);
@@ -91,12 +140,23 @@ void ai_engine_infer(const char *prompt, TokenCallback cb, void *userdata) {
                 n_chars = (int)sizeof(piece) - 1;
             piece[n_chars] = '\0';
             cb(piece, userdata);
+
+            /* Also accumulate for history */
+            if (resp_len + n_chars < (int)sizeof(response) - 1) {
+                memcpy(response + resp_len, piece, (size_t)n_chars);
+                resp_len += n_chars;
+                response[resp_len] = '\0';
+            }
         }
 
         struct llama_batch next = llama_batch_get_one(&new_id, 1);
         if (llama_decode(s_ctx, next) != 0) break;
         n_gen++;
     }
+
+    /* Push assistant response to history */
+    if (resp_len > 0)
+        ai_engine_push_history("assistant", response);
 
     free(tokens);
 }
@@ -114,6 +174,10 @@ void ai_engine_reset_context(void) {
     s_ctx = llama_init_from_model(s_model, cparams);
     if (!s_ctx)
         winalp_log(WINALP_LOG_ERROR, "AI: failed to recreate context after reset");
+    else
+        s_ctx_usage_pct = 0;
+    s_history_count = 0;
+    s_history_head  = 0;
     winalp_log(WINALP_LOG_INFO, "AI: context reset");
 }
 
@@ -121,6 +185,8 @@ void ai_engine_unload(void) {
     if (s_smpl)  { llama_sampler_free(s_smpl); s_smpl = NULL; }
     if (s_ctx)   { llama_free(s_ctx);          s_ctx  = NULL; }
     if (s_model) { llama_model_free(s_model);  s_model = NULL; }
+    s_history_count = 0;
+    s_history_head  = 0;
     winalp_log(WINALP_LOG_INFO, "AI: engine unloaded");
 }
 
@@ -129,4 +195,8 @@ float ai_engine_tokens_per_sec(void) {
     struct llama_perf_context_data perf = llama_perf_context(s_ctx);
     if (perf.t_eval_ms < 0.001) return 0.0f;
     return (float)((double)perf.n_eval / (perf.t_eval_ms / 1000.0));
+}
+
+int ai_engine_context_usage(void) {
+    return s_ctx_usage_pct;
 }
