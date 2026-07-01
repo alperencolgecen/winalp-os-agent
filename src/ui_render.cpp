@@ -95,26 +95,34 @@ char *ui_render_model_select(ModelEntry *models, int n_models) {
                                           (Color){ 15, 20, 30, 80 };
             DrawRectangleRec(rect, bg);
 
-            /* Tier indicator */
-            Color tier_col;
-            switch (models[i].tier) {
-                case 2: tier_col = (Color){ 0, 200, 180, 255 }; break; /* vision=teal */
-                default: tier_col = (Color){ 100, 180, 255, 255 }; break; /* text=blue */
+            /* Compatibility dot */
+            Color compat_col;
+            switch (models[i].compat) {
+                case 3: compat_col = (Color){ 0, 200, 80, 255 }; break;  /* green */
+                case 2: compat_col = (Color){ 240, 200, 0, 255 }; break; /* yellow */
+                case 1: compat_col = (Color){ 220, 40, 40, 255 }; break; /* red */
+                default: compat_col = (Color){ 80, 80, 80, 255 }; break;
             }
-            DrawCircle(x + 12, cy + item_h/2, 6, tier_col);
+            DrawCircle(x + 12, cy + item_h/2, 6, compat_col);
 
             /* Name + size */
             char label[512];
-            snprintf(label, sizeof(label), "%s  (%llu MB)",
-                     models[i].label, models[i].size_mb);
+            const char *vl_tag = (models[i].flags & 1) ? " [VLM]" : "";
+            snprintf(label, sizeof(label), "%s%s  (%llu MB, %s)",
+                     models[i].label, vl_tag, models[i].size_mb, models[i].arch);
             DrawTextEx(font, label, (Vector2){ (float)(x + 30), (float)(cy + 6) },
                        16, 1, (Color){ 220, 230, 240, 255 });
 
-            /* Tier label */
-            const char *tier_str = (models[i].tier == 2) ? "Vision" : "Text";
-            DrawTextEx(font, tier_str,
-                       (Vector2){ (float)(mw - 120), (float)(cy + 8) },
-                       12, 1, tier_col);
+            /* Tier + compat label */
+            const char *tier_str = (models[i].tier == 0) ? "Hafif" :
+                                   (models[i].tier == 1) ? "Orta" : "Guclu";
+            const char *compat_str = (models[i].compat == 3) ? "Uyumlu" :
+                                     (models[i].compat == 2) ? "Sinir" : "Yetersiz Bellek";
+            char right_label[128];
+            snprintf(right_label, sizeof(right_label), "%s | %s", tier_str, compat_str);
+            DrawTextEx(font, right_label,
+                       (Vector2){ (float)(mw - 180), (float)(cy + 8) },
+                       12, 1, compat_col);
         }
 
         /* Scroll hint */

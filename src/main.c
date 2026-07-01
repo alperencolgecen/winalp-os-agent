@@ -17,6 +17,7 @@
 #include "../include/plugin_manager.h"
 #include "../include/thread_pool.h"
 #include "../include/vision_engine.h"
+#include "../include/sys_diag.h"
 
 static bool confirm_cb(const char *desc, void *ud) {
     (void)ud;
@@ -48,18 +49,70 @@ int main(void) {
 
     /* Model selection */
     ModelEntry models[64]; int n_models = 0;
+
+    /* Detect system RAM/VRAM for compatibility checking */
+    SysDiag sysdiag;
+    sys_diag_detect(&sysdiag);
+
+    /* Scan for companion mmproj-*.gguf (VLM projector) files */
+    bool vlm_available = false;
+    WIN32_FIND_DATA mmfd;
+    HANDLE hm = FindFirstFileA("models\\mmproj-*.gguf", &mmfd);
+    if (hm != INVALID_HANDLE_VALUE) { vlm_available = true; FindClose(hm); }
+
     WIN32_FIND_DATA fd;
     HANDLE hf = FindFirstFileA("models\\*.gguf", &fd);
     if (hf != INVALID_HANDLE_VALUE) {
         do {
             if (n_models >= 64) break;
-            strncpy(models[n_models].label, fd.cFileName, sizeof(models[n_models].label) - 1);
-            snprintf(models[n_models].path, sizeof(models[n_models].path), "models\\%s", fd.cFileName);
+            /* Skip mmproj files */
+            if (strstr(fd.cFileName, "mmproj-") != NULL) continue;
+
+            ModelEntry *m = &models[n_models];
+            strncpy(m->label, fd.cFileName, sizeof(m->label) - 1);
+            snprintf(m->path, sizeof(m->path), "models\\%s", fd.cFileName);
             ULARGE_INTEGER sz;
             sz.LowPart  = fd.nFileSizeLow;
             sz.HighPart = fd.nFileSizeHigh;
-            models[n_models].size_mb = sz.QuadPart / (1024 * 1024);
-            models[n_models].tier = models[n_models].size_mb > 8000 ? 2 : 1;
+            m->size_mb = sz.QuadPart / (1024 * 1024);
+
+            /* Detect architecture from filename (heuristic — fast, no model load) */
+            const char *name = fd.cFileName;
+            /* Lowercase copy for matching */
+            char lname[256]; int li = 0;
+            for (const char *p = name; *p && li < 255; p++) lname[li++] = (char)tolower((unsigned char)*p);
+            lname[li] = '\0';
+
+            if      (strstr(lname, "qwen"))   strncpy(m->arch, "qwen", sizeof(m->arch) - 1);
+            else if (strstr(lname, "llama"))  strncpy(m->arch, "llama", sizeof(m->arch) - 1);
+            else if (strstr(lname, "deepseek")) strncpy(m->arch, "deepseek", sizeof(m->arch) - 1);
+            else if (strstr(lname, "llava") || strstr(lname, "bakllava"))
+                                              strncpy(m->arch, "llava", sizeof(m->arch) - 1);
+            else if (strstr(lname, "minicpm") || strstr(lname, "minicpmv"))
+                                              strncpy(m->arch, "minicpm", sizeof(m->arch) - 1);
+            else                              strncpy(m->arch, "unknown", sizeof(m->arch) - 1);
+
+            /* Check if this is a VLM-capable model (needs companion mmproj) */
+            m->flags = 0;
+            if (vlm_available) {
+                /* VLM models usually have "vl" or "vision" in the name */
+                if (strstr(lname, "vl") || strstr(lname, "vision") ||
+                    strcmp(m->arch, "llava") == 0 || strcmp(m->arch, "minicpm") == 0)
+                    m->flags |= 1;
+            }
+
+            /* Tier based on size */
+                 if (m->size_mb < 1500) m->tier = 0; /* hafif */
+            else if (m->size_mb < 8000) m->tier = 1; /* orta */
+            else                         m->tier = 2; /* guclu */
+
+            /* Compatibility: estimate needed RAM ≈ file size + 1GB overhead for context */
+            unsigned long long needed_mb = m->size_mb + 1024;
+            unsigned long long free_mb = sysdiag.ram_free_mb + sysdiag.vram_free_mb;
+                 if (free_mb >= needed_mb + 1024) m->compat = 3; /* green */
+            else if (free_mb >= needed_mb)         m->compat = 2; /* yellow */
+            else                                    m->compat = 1; /* red */
+
             n_models++;
         } while (FindNextFileA(hf, &fd));
         FindClose(hf);

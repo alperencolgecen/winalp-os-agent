@@ -13,8 +13,11 @@ extern "C" {
 typedef struct {
     char path[512];
     char label[256];
+    char arch[64];            /* GGUF architecture hint (e.g. "qwen2", "llama") */
     unsigned long long size_mb;
-    int tier; /* 0=unknown, 1=text, 2=vision */
+    int tier;                 /* 0=hafif(<1.5GB), 1=orta(1.5-8GB), 2=guclu(>8GB) */
+    int compat;               /* 0=unknown, 1=red(not enough RAM), 2=yellow(borderline), 3=green(OK) */
+    int flags;                /* bit 0: VLM-capable (mmproj companion found) */
 } ModelEntry;
 
 /* Model selection screen — returns strdup'd path or NULL on exit */
