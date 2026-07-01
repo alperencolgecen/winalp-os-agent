@@ -3,6 +3,10 @@
 #define AI_ENGINE_H
 #include <stdbool.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 typedef void (*TokenCallback)(const char *token, void *userdata);
 
 void  ai_engine_set_system_prompt(const char *prompt);
@@ -16,5 +20,9 @@ void  ai_engine_reset_context(void);
 void  ai_engine_unload(void);
 float ai_engine_tokens_per_sec(void);
 int   ai_engine_context_usage(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* AI_ENGINE_H */

@@ -1,10 +1,18 @@
 #include "../include/ui_render.h"
+
+extern "C" {
+#include "../include/ai_engine.h"
+#include "../include/audio_capture.h"
+#include "../include/sys_diag.h"
+}
+
 #include "../include/logger.h"
 
 #include <cstdio>
 #include <cmath>
 #include "raylib.h"
 #include "imgui.h"
+#include "implot.h"
 #include "imgui_impl_raylib.h"
 
 #define MAX_CHAT_LINES 256
@@ -385,6 +393,71 @@ static void ui_draw_right_panel(void) {
     ImGui::End();
 }
 
+/* Performance monitoring — rolling buffers for ImPlot */
+#define PERF_SAMPLES 180
+static struct {
+    double tokens_per_sec[PERF_SAMPLES];
+    double ctx_usage[PERF_SAMPLES];
+    double mic_amplitude[PERF_SAMPLES];
+    double fps[PERF_SAMPLES];
+    int    idx;
+    int    count;
+} s_perf;
+
+static void perf_push(void) {
+    int i = s_perf.idx;
+    s_perf.tokens_per_sec[i] = (double)ai_engine_tokens_per_sec();
+    s_perf.ctx_usage[i]      = (double)ai_engine_context_usage();
+    s_perf.mic_amplitude[i]  = (double)audio_capture_rms();
+    s_perf.fps[i]            = (double)GetFPS();
+    s_perf.idx = (i + 1) % PERF_SAMPLES;
+    if (s_perf.count < PERF_SAMPLES) s_perf.count++;
+}
+
+static void ui_draw_perf_panel(void) {
+    float panel_w = 280, panel_h = 200;
+    float x = (float)(s_width - 200 - panel_w - 10);
+    float y = (float)(s_height - 240 - panel_h - 10);
+    ImGui::SetNextWindowPos(ImVec2(x, y), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(panel_w, panel_h), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowBgAlpha(0.30f);
+    ImGui::Begin("##perf", NULL,
+        ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus);
+
+    ImGui::TextUnformatted("PERFORMANCE");
+    ImGui::Separator();
+
+    /* Tokens/sec */
+    if (ImPlot::BeginPlot("##tps", ImVec2(-1, 40), ImPlotFlags_NoTitle | ImPlotFlags_NoLegend)) {
+        ImPlot::SetupAxes(NULL, NULL, ImPlotAxisFlags_NoDecorations, ImPlotAxisFlags_NoDecorations);
+        ImPlot::SetupAxisLimits(ImAxis_X1, 0, PERF_SAMPLES);
+        ImPlot::SetupAxisLimits(ImAxis_Y1, 0, 100);
+        ImPlot::PlotLine("##tps", s_perf.tokens_per_sec, s_perf.count, 1.0, 0.0, 0, sizeof(double));
+        ImPlot::EndPlot();
+    }
+
+    /* Context usage % */
+    if (ImPlot::BeginPlot("##ctx", ImVec2(-1, 40), ImPlotFlags_NoTitle | ImPlotFlags_NoLegend)) {
+        ImPlot::SetupAxes(NULL, NULL, ImPlotAxisFlags_NoDecorations, ImPlotAxisFlags_NoDecorations);
+        ImPlot::SetupAxisLimits(ImAxis_X1, 0, PERF_SAMPLES);
+        ImPlot::SetupAxisLimits(ImAxis_Y1, 0, 100);
+        ImPlot::PlotLine("##ctx", s_perf.ctx_usage, s_perf.count, 1.0, 0.0, 0, sizeof(double));
+        ImPlot::EndPlot();
+    }
+
+    /* Mic amplitude */
+    if (ImPlot::BeginPlot("##mic", ImVec2(-1, 40), ImPlotFlags_NoTitle | ImPlotFlags_NoLegend)) {
+        ImPlot::SetupAxes(NULL, NULL, ImPlotAxisFlags_NoDecorations, ImPlotAxisFlags_NoDecorations);
+        ImPlot::SetupAxisLimits(ImAxis_X1, 0, PERF_SAMPLES);
+        ImPlot::SetupAxisLimits(ImAxis_Y1, 0, 1);
+        ImPlot::PlotLine("##mic", s_perf.mic_amplitude, s_perf.count, 1.0, 0.0, 0, sizeof(double));
+        ImPlot::EndPlot();
+    }
+
+    ImGui::End();
+}
+
 static void ui_draw_bottom_chat(void) {
     float chatH = 240;
     ImGui::SetNextWindowPos(ImVec2(200, (float)s_height - chatH), ImGuiCond_Always);
@@ -458,6 +531,7 @@ void ui_render_init(int width, int height, const char *title) {
     }
 
     ImGui_ImplRaylib_Init(width, height);
+    ImPlot::CreateContext();
 
     ImGuiStyle& style = ImGui::GetStyle();
     style.WindowRounding = 4.0f;
@@ -478,6 +552,7 @@ void ui_render_frame(AgentState state, float amplitude) {
     s_height = GetScreenHeight();
 
     waveform_push(amplitude);
+    perf_push();
 
     ImGui_ImplRaylib_NewFrame();
 
@@ -489,6 +564,7 @@ void ui_render_frame(AgentState state, float amplitude) {
     ui_draw_top_strip();
     ui_draw_left_panel();
     ui_draw_right_panel();
+    ui_draw_perf_panel();
     ui_draw_bottom_chat();
     ui_draw_overlay();
 
@@ -501,6 +577,7 @@ bool ui_render_should_close(void) {
 }
 
 void ui_render_shutdown(void) {
+    ImPlot::DestroyContext();
     ImGui_ImplRaylib_Shutdown();
     CloseWindow();
 }
