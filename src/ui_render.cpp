@@ -196,15 +196,24 @@ static void draw_arc_reactor(AgentState state, float amplitude) {
     bool held = s_octagon_held;
     Color sqCol = held ? (Color){0,255,100,255} : cyan;
     float speedMult = held ? 4.0f : 1.0f;
-    for (int i = 0; i < 4; i++) {
-        float rot = s_time * (120.0f + i * 45.0f) * speedMult + i * 22.5f;
-        float s = r_core * (1.0f - i * 0.18f);
+    float angVel[8] = {40.0f, 55.0f, 70.0f, 85.0f, 100.0f, 115.0f, 130.0f, 145.0f};
+    float sizeFac[8] = {1.0f, 0.85f, 0.70f, 0.57f, 0.45f, 0.34f, 0.24f, 0.15f};
+    for (int i = 0; i < 8; i++) {
+        float rot = s_time * angVel[i] * speedMult + i * 22.5f;
+        float s = r_core * sizeFac[i];
         Vector2 c = {(float)cx, (float)cy};
-        Color outline = (i == 0) ? alpha(sqCol, 80 + (int)(40 * sinf(s_time * 0.5f + i)))
-                                 : alpha(sqCol, 120 - i * 25);
-        Color fill = (i == 2) ? alpha(held ? (Color){0,255,100,80} : col, 50) : BLANK;
-        if (fill.a > 0) DrawPoly(c, 4, s, rot, fill);
-        DrawPolyLines(c, 4, s, rot, outline);
+        int baseAlpha = (i == 0) ? 80 + (int)(40 * sinf(s_time * 0.5f + i)) : (120 - i * 12 > 40 ? 120 - i * 12 : 40);
+        Color fill = (i == 3) ? alpha(held ? (Color){0,255,100,80} : col, 40) : BLANK;
+        for (int g = 6; g >= 0; g--) {
+            float gr = rot - g * dt * angVel[i] * speedMult;
+            int ga = baseAlpha * (7 - g) / 8;
+            if (g == 0) {
+                if (fill.a > 0) DrawPoly(c, 4, s, gr, fill);
+                DrawPolyLines(c, 4, s, gr, alpha(sqCol, ga));
+            } else {
+                DrawPolyLines(c, 4, s, gr, alpha(sqCol, ga / 2));
+            }
+        }
     }
 
     DrawCircle(cx, cy, 30.0f + amplitude*5.0f, alpha(WHITE, 200));
