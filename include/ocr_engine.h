@@ -3,6 +3,10 @@
 #define OCR_ENGINE_H
 #include <stdbool.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /* Initialize OCR subsystem (call once at startup) */
 bool ocr_engine_init(void);
 
@@ -21,5 +25,9 @@ void ocr_engine_free_text(char *text);
 
 /* Shutdown OCR subsystem */
 void ocr_engine_shutdown(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* OCR_ENGINE_H */

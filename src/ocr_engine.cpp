@@ -1,4 +1,5 @@
 /* ocr_engine.cpp — Windows built-in OCR via direct WinRT COM */
+#include "../include/ocr_engine.h"
 #include <windows.h>
 #include <roapi.h>
 #include <windows.graphics.imaging.h>
