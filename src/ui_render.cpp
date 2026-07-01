@@ -36,6 +36,84 @@ static ImGuiTextFilter s_chatFilter;
 /* Waveform history */
 #define WAVE_LEN 256
 static float s_waveform[WAVE_LEN];
+
+static void state_color_rgba(AgentState state, float out[4]);
+
+/* Particle system for orb */
+#define MAX_PARTICLES 512
+typedef struct {
+    Vector3 pos;
+    Vector3 vel;
+    float life;
+    float max_life;
+    float size;
+    Color col;
+} Particle;
+static Particle s_particles[MAX_PARTICLES];
+static int s_particle_count;
+
+/* Adaptive LOD — detect weak GPU and reduce particles */
+static int particle_max_count(void) {
+    static int cached = 0;
+    if (cached) return cached;
+    SysDiag d;
+    sys_diag_detect(&d);
+    if (d.vram_total_mb < 1024 || d.vram_total_mb == 0) /* no GPU or weak */
+        cached = 128;
+    else if (d.vram_total_mb < 2048)
+        cached = 256;
+    else
+        cached = MAX_PARTICLES;
+    return cached;
+}
+
+static void particles_update(float dt, AgentState state) {
+    int max_p = particle_max_count();
+    if (s_particle_count < max_p)
+        s_particle_count = max_p;
+
+    float col[4] = {0};
+    state_color_rgba(state, col);
+    Color base = { (unsigned char)col[0], (unsigned char)col[1], (unsigned char)col[2], 200 };
+
+    for (int i = 0; i < s_particle_count; i++) {
+        s_particles[i].life -= dt;
+        if (s_particles[i].life <= 0.0f) {
+            /* Respawn particle on spherical shell around orb */
+            float theta = (float)(rand() % 10000) / 10000.0f * 2.0f * 3.14159f;
+            float phi   = acosf((float)(rand() % 10000) / 10000.0f * 2.0f - 1.0f);
+            float r     = 2.5f + (float)(rand() % 10000) / 10000.0f * 4.0f;
+            s_particles[i].pos.x = r * sinf(phi) * cosf(theta);
+            s_particles[i].pos.y = r * cosf(phi);
+            s_particles[i].pos.z = r * sinf(phi) * sinf(theta);
+            /* Slow drift velocity */
+            s_particles[i].vel.x = (float)(rand() % 10000 - 5000) / 5000.0f * 0.3f;
+            s_particles[i].vel.y = (float)(rand() % 10000 - 5000) / 5000.0f * 0.3f;
+            s_particles[i].vel.z = (float)(rand() % 10000 - 5000) / 5000.0f * 0.3f;
+            s_particles[i].max_life = 2.0f + (float)(rand() % 10000) / 10000.0f * 3.0f;
+            s_particles[i].life = s_particles[i].max_life;
+            s_particles[i].size = 0.03f + (float)(rand() % 10000) / 10000.0f * 0.05f;
+            s_particles[i].col = base;
+        } else {
+            /* Move particle */
+            s_particles[i].pos.x += s_particles[i].vel.x * dt;
+            s_particles[i].pos.y += s_particles[i].vel.y * dt;
+            s_particles[i].pos.z += s_particles[i].vel.z * dt;
+            /* Fade out */
+            float life_ratio = s_particles[i].life / s_particles[i].max_life;
+            s_particles[i].col.a = (unsigned char)(200.0f * life_ratio);
+        }
+    }
+}
+
+static void particles_draw(void) {
+    for (int i = 0; i < s_particle_count; i++) {
+        float lr = s_particles[i].life / s_particles[i].max_life;
+        Color c = s_particles[i].col;
+        c.a = (unsigned char)((float)c.a * lr);
+        DrawSphere(s_particles[i].pos, s_particles[i].size, c);
+    }
+}
 static int   s_wavePos;
 
 /* Overlay state */
@@ -291,6 +369,9 @@ static void ui_draw_orb(AgentState state, float amplitude) {
     col.b = (unsigned char)s_colorLerp[2];
     col.a = (unsigned char)s_colorLerp[3];
 
+    /* Update particle system */
+    particles_update(dt, state);
+
     /* Orbiting camera */
     float camAngle = s_orbTime * 0.15f;
     s_orbCamera.position = (Vector3){ sinf(camAngle) * 7.0f, 1.0f, cosf(camAngle) * 7.0f };
@@ -300,6 +381,9 @@ static void ui_draw_orb(AgentState state, float amplitude) {
     s_orbCamera.projection = CAMERA_PERSPECTIVE;
 
     BeginMode3D(s_orbCamera);
+
+    /* Draw particles */
+    particles_draw();
 
     /* Amplitude-driven morphing — orb breathes with audio/mock RMS */
     float breath  = 0.7f + 0.3f * amplitude;
