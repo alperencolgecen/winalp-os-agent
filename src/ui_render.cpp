@@ -197,7 +197,7 @@ static void draw_arc_reactor(AgentState state, float amplitude) {
     Color sqCol = held ? (Color){0,255,100,255} : cyan;
     float speedMult = held ? 4.0f : 1.0f;
     for (int i = 0; i < 4; i++) {
-        float rot = s_time * (0.8f + i * 0.3f) * speedMult + i * 22.5f;
+        float rot = s_time * (120.0f + i * 45.0f) * speedMult + i * 22.5f;
         float s = r_core * (1.0f - i * 0.18f);
         Vector2 c = {(float)cx, (float)cy};
         Color outline = (i == 0) ? alpha(sqCol, 80 + (int)(40 * sinf(s_time * 0.5f + i)))
