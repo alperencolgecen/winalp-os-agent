@@ -196,8 +196,30 @@ int main(void) {
             winalp_log(WINALP_LOG_INFO, "AI engine ready: %s", selected_model);
         else
             winalp_log(WINALP_LOG_WARN, "AI engine failed: %s", selected_model);
-    } else {
-        winalp_log(WINALP_LOG_WARN, "No GGUF model found in models/");
+    }
+
+    /* Auto-download a compatible AI model if none loaded */
+    if (!ai_ok) {
+        winalp_log(WINALP_LOG_INFO, "AI: no compatible model found — auto-downloading Qwen 1.5B Q4_K_M (~1GB)...");
+        /* Remove incompatible models to free space */
+        WIN32_FIND_DATA rmfd;
+        HANDLE rmh = FindFirstFileA("models\\*.gguf", &rmfd);
+        if (rmh != INVALID_HANDLE_VALUE) {
+            do {
+                if (strstr(rmfd.cFileName, "mmproj-") != NULL) continue;
+                char rmpath[1024];
+                snprintf(rmpath, sizeof(rmpath), "models\\%s", rmfd.cFileName);
+                DeleteFileA(rmpath);
+                winalp_log(WINALP_LOG_INFO, "AI: removed incompatible model %s", rmfd.cFileName);
+            } while (FindNextFileA(rmh, &rmfd));
+            FindClose(rmh);
+        }
+        system("powershell -Command \"Invoke-WebRequest -Uri 'https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf' -OutFile 'models\\brain-model.gguf' -UseBasicParsing\"");
+        ai_ok = ai_engine_load_auto("models/brain-model.gguf");
+        if (ai_ok)
+            winalp_log(WINALP_LOG_INFO, "AI engine ready after auto-download");
+        else
+            winalp_log(WINALP_LOG_WARN, "AI: auto-download failed");
     }
 
     prompt_engine_init("prompts");
