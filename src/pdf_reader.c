@@ -79,12 +79,4 @@ char *pdf_reader_extract_text(const char *pdf_path) {
     return result;
 }
 
-/* Render page stub — returns NULL (needs MuPDF or equivalent linked) */
-unsigned char *pdf_reader_render_page(const char *pdf_path, int page,
-                                       int *out_w, int *out_h) {
-    (void)pdf_path; (void)page;
-    if (out_w) *out_w = 0;
-    if (out_h) *out_h = 0;
-    winalp_log(WINALP_LOG_INFO, "pdf_reader: render_page stub — OCR/VLM path not linked yet");
-    return NULL;
-}
+/* pdf_reader_render_page is implemented in pdf_render_winrt.cpp (C++ WinRT COM) */

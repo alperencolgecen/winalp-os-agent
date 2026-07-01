@@ -68,10 +68,13 @@ bool doc_router_process_image(const unsigned char *bitmap, int width, int height
     return false;
 }
 
+/* Forward: pdf_reader_render_page from pdf_image_extract.cpp */
+unsigned char *pdf_reader_render_page(const char *pdf_path, int page,
+                                       int *out_w, int *out_h);
+
 bool doc_router_process_pdf_page(const char *pdf_path, int page_num, char **out_text) {
     if (!pdf_path || !out_text) return false;
     *out_text = NULL;
-    (void)page_num;
 
     /* Try text extraction first */
     char *text = pdf_reader_extract_text(pdf_path);
@@ -80,8 +83,18 @@ bool doc_router_process_pdf_page(const char *pdf_path, int page_num, char **out_
         return true;
     }
 
-    /* If text extraction fails, would render page and OCR (stub) */
-    winalp_log(WINALP_LOG_INFO, "doc_router: PDF text extraction returned no content for page %d", page_num);
+    /* Text extraction failed — try rendering page as image and OCR */
+    int w = 0, h = 0;
+    unsigned char *pixels = pdf_reader_render_page(pdf_path, page_num, &w, &h);
+    if (pixels && w > 0 && h > 0) {
+        winalp_log(WINALP_LOG_INFO, "doc_router: rendered PDF page %d to image %dx%d",
+                   page_num, w, h);
+        bool ok = doc_router_process_image(pixels, w, h, out_text);
+        free(pixels);
+        if (ok) return true;
+    }
+
+    winalp_log(WINALP_LOG_INFO, "doc_router: PDF page %d yielded no content (text nor image)", page_num);
     return false;
 }
 

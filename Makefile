@@ -48,6 +48,7 @@ CXX_SRCS = $(SRCDIR)/ui_render.cpp \
            $(SRCDIR)/stt_engine.cpp \
            $(SRCDIR)/vision_engine.cpp \
            $(SRCDIR)/ocr_engine.cpp \
+           $(SRCDIR)/pdf_image_extract.cpp \
            $(LIBDIR)/imgui/imgui.cpp \
            $(LIBDIR)/imgui/imgui_draw.cpp \
            $(LIBDIR)/imgui/imgui_tables.cpp \

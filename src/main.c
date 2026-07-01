@@ -18,6 +18,7 @@
 #include "../include/thread_pool.h"
 #include "../include/vision_engine.h"
 #include "../include/sys_diag.h"
+#include "../include/doc_router.h"
 
 static bool confirm_cb(const char *desc, void *ud) {
     (void)ud;
@@ -152,6 +153,9 @@ int main(void) {
     if (!mic_ok)
         winalp_log(WINALP_LOG_WARN, "Mic unavailable");
 
+    /* Initialise document router (PDF/OCR/VLM) */
+    doc_router_init("models");
+
     /* Start background threads */
     vision_engine_init();
     thread_pool_start_all();
@@ -268,6 +272,7 @@ int main(void) {
     audio_capture_stop();
     stt_engine_unload();
     ai_engine_unload();
+    doc_router_shutdown();
     prompt_engine_shutdown();
     plugin_manager_shutdown();
     memory_store_shutdown();
