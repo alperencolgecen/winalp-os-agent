@@ -30,7 +30,6 @@ C_SRCS = $(SRCDIR)/main.c \
          $(SRCDIR)/logger.c \
          $(SRCDIR)/ai_engine.c \
          $(SRCDIR)/audio_capture.c \
-         $(SRCDIR)/vision_engine.c \
          $(SRCDIR)/system_agent.c \
          $(SRCDIR)/memory_store.c \
          $(SRCDIR)/lua_runtime.c \
@@ -47,6 +46,7 @@ C_SRCS = $(SRCDIR)/main.c \
 # C++ source files (project modules + ImGui + ImPlot + raylib backend)
 CXX_SRCS = $(SRCDIR)/ui_render.cpp \
            $(SRCDIR)/stt_engine.cpp \
+           $(SRCDIR)/vision_engine.cpp \
            $(SRCDIR)/ocr_engine.cpp \
            $(LIBDIR)/imgui/imgui.cpp \
            $(LIBDIR)/imgui/imgui_draw.cpp \
