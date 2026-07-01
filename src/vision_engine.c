@@ -2,18 +2,34 @@
 #include "../include/logger.h"
 #include <windows.h>
 #include <dxgi.h>
-#include <dxgi1_2.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
+
+#define SCREEN_W 1920
+#define SCREEN_H 1080
 
 static bool s_capturing;
 static OcrResultCallback s_cb;
 static void *s_ud;
 
+/* Pixel-change detection */
+static unsigned char *s_prev_frame;  /* hash of previous frame */
+static int s_prev_size;
+
 /* DXGI COM via dynamic vtable calls (MinGW-compatible) */
 typedef HRESULT (WINAPI *CreateDXGIFactoryFn)(REFIID, void**);
 
+static unsigned int simple_hash(const unsigned char *data, int len) {
+    unsigned int h = 5381;
+    for (int i = 0; i < len; i++)
+        h = ((h << 5) + h) + (unsigned int)data[i];
+    return h;
+}
+
 bool vision_engine_init(void) {
+    s_prev_frame = NULL;
+    s_prev_size = 0;
     winalp_log(WINALP_LOG_INFO, "vision_engine: initialised");
     return true;
 }
@@ -25,67 +41,93 @@ void vision_engine_start_capture(OcrResultCallback cb, void *ud) {
     winalp_log(WINALP_LOG_INFO, "vision_engine: capture started");
 }
 
-static void capture_single_frame(void) {
-    HMODULE hDxgi = LoadLibraryA("dxgi.dll");
-    if (!hDxgi) return;
+/* Capture desktop via BitBlt (simple GDI fallback, no D3D11 device needed yet) */
+static int capture_desktop(unsigned char **out_data, int *out_w, int *out_h) {
+    HDC hdcScreen = GetDC(NULL);
+    HDC hdcMem    = CreateCompatibleDC(hdcScreen);
 
-    CreateDXGIFactoryFn fn = (CreateDXGIFactoryFn)GetProcAddress(hDxgi, "CreateDXGIFactory1");
-    if (!fn) { FreeLibrary(hDxgi); return; }
+    *out_w = GetDeviceCaps(hdcScreen, HORZRES);
+    *out_h = GetDeviceCaps(hdcScreen, VERTRES);
 
-    /* IID_IDXGIFactory1 = {770aae78-f26f-4dba-a829-253c83d1b387} */
-    IID iidFactory = {0x770aae78,0xf26f,0x4dba,{0xa8,0x29,0x25,0x3c,0x83,0xd1,0xb3,0x87}};
-    IDXGIFactory1 *pFactory = NULL;
-    if (FAILED(fn(&iidFactory, (void**)&pFactory))) {
-        FreeLibrary(hDxgi);
-        return;
+    HBITMAP hBmp = CreateCompatibleBitmap(hdcScreen, *out_w, *out_h);
+    SelectObject(hdcMem, hBmp);
+
+    BitBlt(hdcMem, 0, 0, *out_w, *out_h, hdcScreen, 0, 0, SRCCOPY);
+
+    BITMAPINFO bmi = {0};
+    bmi.bmiHeader.biSize        = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth       = *out_w;
+    bmi.bmiHeader.biHeight      = -*out_h;  /* top-down */
+    bmi.bmiHeader.biPlanes      = 1;
+    bmi.bmiHeader.biBitCount    = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    int data_size = (*out_w) * (*out_h) * 4;
+    *out_data = (unsigned char*)malloc((size_t)data_size);
+    if (!*out_data) {
+        DeleteObject(hBmp); DeleteDC(hdcMem); ReleaseDC(NULL, hdcScreen);
+        return 0;
     }
 
-    /* Enum adapter 0 */
-    IDXGIAdapter1 *pAdapter = NULL;
-    /* vtable[4] = EnumAdapters1 */
-    HRESULT (STDMETHODCALLTYPE *enumAdap)(IDXGIFactory1*, UINT, IDXGIAdapter1**) =
-        (void*)(((void***)pFactory)[0][4]);
-    if (FAILED(enumAdap(pFactory, 0, &pAdapter))) {
-        /* Release factory */
-        ULONG (STDMETHODCALLTYPE *relFac)(IDXGIFactory1*) = (void*)(((void***)pFactory)[0][2]);
-        relFac(pFactory);
-        FreeLibrary(hDxgi);
-        return;
+    GetDIBits(hdcMem, hBmp, 0, (UINT)*out_h, *out_data, &bmi, DIB_RGB_COLORS);
+
+    DeleteObject(hBmp);
+    DeleteDC(hdcMem);
+    ReleaseDC(NULL, hdcScreen);
+    return data_size;
+}
+
+void vision_engine_poll(void) {
+    if (!s_capturing) return;
+
+    unsigned char *frame = NULL;
+    int w, h, data_size;
+
+    data_size = capture_desktop(&frame, &w, &h);
+    if (data_size <= 0 || !frame) return;
+
+    /* Pixel-change detection via hash comparison */
+    unsigned int new_hash = simple_hash(frame, data_size);
+
+    if (s_prev_frame && s_prev_size == data_size) {
+        unsigned int old_hash = simple_hash(s_prev_frame, s_prev_size);
+        if (new_hash == old_hash) {
+            /* screen unchanged — skip OCR */
+            free(frame);
+            return;
+        }
     }
 
-    /* Create IDXGIDevice from adapter (need D3D11 device) */
-    /* For simplicity, use GetDesc to log adapter info and signal capture */
-    DXGI_ADAPTER_DESC desc;
-    HRESULT (STDMETHODCALLTYPE *getDesc)(IDXGIAdapter1*, DXGI_ADAPTER_DESC*) =
-        (void*)(((void***)pAdapter)[0][5]);
-    if (SUCCEEDED(getDesc(pAdapter, &desc))) {
-        char gpu_name[128];
-        WideCharToMultiByte(CP_UTF8, 0, desc.Description, -1, gpu_name, sizeof(gpu_name), NULL, NULL);
-        winalp_log(WINALP_LOG_INFO, "vision_engine: adapter %s (%llu MB VRAM)",
-                   gpu_name, desc.DedicatedVideoMemory / (1024*1024));
-    }
+    /* Screen changed — run OCR (stub) */
+    free(s_prev_frame);
+    s_prev_frame = frame;
+    s_prev_size  = data_size;
 
-    /* Release adapter */
-    ULONG (STDMETHODCALLTYPE *relAdap)(IDXGIAdapter1*) = (void*)(((void***)pAdapter)[0][2]);
-    relAdap(pAdapter);
-    /* Release factory */
-    ULONG (STDMETHODCALLTYPE *relFac)(IDXGIFactory1*) = (void*)(((void***)pFactory)[0][2]);
-    relFac(pFactory);
+    /* OCR placeholder: report pixel count as proof of concept */
+    char result[256];
+    snprintf(result, sizeof(result),
+             "(screen %dx%d, %d bytes, hash 0x%08x — OCR stub)",
+             w, h, data_size, new_hash);
 
-    FreeLibrary(hDxgi);
-
-    /* Callback with placeholder — full D3D11 device + duplication in later stage */
     if (s_cb)
-        s_cb("(screen capture — DXGI placeholder)", s_ud);
+        s_cb(result, s_ud);
+
+    winalp_log(WINALP_LOG_INFO, "vision_engine: screen changed — %s", result);
 }
 
 void vision_engine_stop_capture(void) {
     s_capturing = false;
+    free(s_prev_frame);
+    s_prev_frame = NULL;
+    s_prev_size = 0;
     winalp_log(WINALP_LOG_INFO, "vision_engine: capture stopped");
 }
 
 void vision_engine_shutdown(void) {
     s_capturing = false;
+    free(s_prev_frame);
+    s_prev_frame = NULL;
+    s_prev_size = 0;
     s_cb = NULL;
     winalp_log(WINALP_LOG_INFO, "vision_engine: shut down");
 }
