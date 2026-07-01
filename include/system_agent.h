@@ -17,4 +17,8 @@ void system_agent_set_confirm_cb(ConfirmCallback cb, void *ud);
 typedef void (*FileContentCallback)(const char *content, void *ud);
 void system_agent_set_content_cb(FileContentCallback cb, void *ud);
 
+/* Register a callback for <think>...</think> reasoning blocks */
+typedef void (*ReasoningCallback)(const char *reasoning, void *ud);
+void system_agent_set_reasoning_cb(ReasoningCallback cb, void *ud);
+
 #endif /* SYSTEM_AGENT_H */

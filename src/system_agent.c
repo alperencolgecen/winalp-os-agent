@@ -13,10 +13,19 @@ static int  s_len;
 static bool s_in_brace;
 static int  s_brace_depth;
 
-static ConfirmCallback s_confirm_cb;
-static void           *s_confirm_ud;
-static FileContentCallback s_content_cb;
-static void          *s_content_ud;
+static ConfirmCallback    s_confirm_cb;
+static void             *s_confirm_ud;
+static FileContentCallback  s_content_cb;
+static void             *s_content_ud;
+static ReasoningCallback   s_reason_cb;
+static void             *s_reason_ud;
+
+/* <think> tag parser state */
+enum { THINK_IDLE, THINK_OPENING, THINK_BODY, THINK_CLOSING };
+static int  s_think_state;
+static char s_think_buf[16384];
+static int  s_think_len;
+static int  s_tag_pos; /* position inside <think> or </think> */
 
 void system_agent_set_confirm_cb(ConfirmCallback cb, void *ud) {
     s_confirm_cb = cb;
@@ -26,6 +35,11 @@ void system_agent_set_confirm_cb(ConfirmCallback cb, void *ud) {
 void system_agent_set_content_cb(FileContentCallback cb, void *ud) {
     s_content_cb = cb;
     s_content_ud = ud;
+}
+
+void system_agent_set_reasoning_cb(ReasoningCallback cb, void *ud) {
+    s_reason_cb = cb;
+    s_reason_ud = ud;
 }
 
 /* JSON tokeniser states */
@@ -210,10 +224,77 @@ static void exec_action(const char *json) {
     }
 }
 
+/* Feed a token (word fragment) through the <think> tag FSM and JSON parser */
 bool system_agent_feed(const char *token) {
     if (!token) return false;
+
+    /* Process character by character */
     while (*token) {
         char c = *token++;
+
+        /* <think> tag state machine */
+        switch (s_think_state) {
+        case THINK_IDLE:
+            if (c == '<') {
+                s_think_state = THINK_OPENING;
+                s_tag_pos = 0;
+                continue;
+            }
+            break;
+        case THINK_OPENING: {
+            const char *tag = "think>";
+            if (s_tag_pos < 6 && c == tag[s_tag_pos]) {
+                s_tag_pos++;
+                if (s_tag_pos == 6) {
+                    s_think_state = THINK_BODY;
+                    s_think_len = 0;
+                }
+            } else {
+                /* False alarm: emit skipped '<' and current char to JSON parser */
+                s_think_state = THINK_IDLE;
+                /* re-route '<' and c through the JSON parser */
+                goto emit_json;
+            }
+            continue;
+        }
+        case THINK_BODY:
+            if (c == '<') {
+                s_think_state = THINK_CLOSING;
+                s_tag_pos = 0;
+                continue;
+            }
+            if (s_think_len < (int)sizeof(s_think_buf) - 1)
+                s_think_buf[s_think_len++] = c;
+            continue;
+        case THINK_CLOSING: {
+            const char *tag = "/think>";
+            if (s_tag_pos < 7 && c == tag[s_tag_pos]) {
+                s_tag_pos++;
+                if (s_tag_pos == 7) {
+                    s_think_buf[s_think_len] = '\0';
+                    if (s_reason_cb)
+                        s_reason_cb(s_think_buf, s_reason_ud);
+                    winalp_log(WINALP_LOG_INFO, "agent: reasoning block (%d chars)", s_think_len);
+                    s_think_state = THINK_IDLE;
+                }
+            } else {
+                /* False alarm: the '<' was not </think> */
+                /* Re-emit buffered think content + '<' + c */
+                s_think_state = THINK_BODY;
+                if (s_think_len < (int)sizeof(s_think_buf) - 1)
+                    s_think_buf[s_think_len++] = '<';
+                /* now c will be handled in THINK_BODY on next iteration */
+                /* but we need to re-process c */
+                token--; /* un-consume c */
+            }
+            continue;
+        }
+        }
+
+        /* Only process JSON when not inside a think block */
+        if (s_think_state != THINK_IDLE) continue;
+
+    emit_json:
         if (c == '{' && !s_in_brace) {
             s_in_brace = true;
             s_brace_depth = 1;
@@ -242,4 +323,7 @@ void system_agent_flush(void) {
     s_in_brace = false;
     s_len = 0;
     s_brace_depth = 0;
+    s_think_state = THINK_IDLE;
+    s_tag_pos = 0;
+    s_think_len = 0;
 }
