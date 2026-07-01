@@ -38,12 +38,29 @@ static int extract_str(const char *src, const char *key, char *out, int out_sz) 
     return i;
 }
 
-static bool path_safe(const char *path) {
+static const char *s_allowed_roots[] = {
+    "work", "profile", "scripts", "prompts", "plugins", NULL
+};
+
+static bool path_verify(const char *path) {
     if (!path || !path[0]) return false;
-    if (strstr(path, "..") || strstr(path, "~") || strstr(path, ":"))
+    /* block traversal chars and absolute paths */
+    if (strstr(path, "..") || strstr(path, "~") || strchr(path, ':'))
         return false;
     if (path[0] == '/' || path[0] == '\\') return false;
-    return true;
+    if (strchr(path, '*') || strchr(path, '?') || strchr(path, '<') ||
+        strchr(path, '>') || strchr(path, '|'))
+        return false;
+    /* path must start with one of the allowed roots */
+    for (int i = 0; s_allowed_roots[i]; i++) {
+        size_t rlen = strlen(s_allowed_roots[i]);
+        if (strncmp(path, s_allowed_roots[i], rlen) == 0) {
+            char next = path[rlen];
+            if (next == '\\' || next == '/' || next == '\0')
+                return true;
+        }
+    }
+    return false;
 }
 
 static void exec_action(const char *json) {
@@ -52,13 +69,13 @@ static void exec_action(const char *json) {
     extract_str(json, "path", path, sizeof(path));
     extract_str(json, "content", content, sizeof(content));
 
-    if (!path_safe(path)) {
-        winalp_log(WINALP_LOG_WARN, "agent: blocked unsafe path: %s", path);
+    if (!path_verify(path)) {
+        winalp_log(WINALP_LOG_WARN, "agent: blocked path outside whitelist: %s", path);
         return;
     }
 
     char full[MAX_PATH];
-    snprintf(full, sizeof(full), "%s\\%s\\%s", SANDBOX_ROOT, path[0] ? path : ".");
+    snprintf(full, sizeof(full), "%s\\%s", SANDBOX_ROOT, path);
 
     if (strcmp(action, "create_file") == 0) {
         char dir[MAX_PATH];
