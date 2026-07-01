@@ -43,6 +43,7 @@ static float s_colorTarget[4] = {0, 212, 255, 255};
 static Font s_font;
 static bool s_font_loaded = false;
 static bool s_octagon_held = false;
+static float s_speedLerp = 1.0f;
 
 static volatile char s_transcript[4096] = "";
 
@@ -193,19 +194,20 @@ static void draw_arc_reactor(AgentState state, float amplitude) {
     float r_core = 90.0f + amplitude * 10.0f;
     DrawCircleGradient(cx, cy, r_core * 1.5f, alpha(col, 80), (Color){0,0,0,0});
     
-    bool held = s_octagon_held;
-    Color sqCol = held ? (Color){0,255,100,255} : cyan;
-    float speedMult = held ? 4.0f : 1.0f;
+    float speedTarget = s_octagon_held ? 4.0f : 1.0f;
+    float speedEase = 1.0f - powf(0.01f, dt * 4.0f);
+    s_speedLerp += (speedTarget - s_speedLerp) * speedEase;
+    Color sqCol = s_octagon_held ? (Color){0,255,100,255} : cyan;
     float angVel[8] = {40.0f, 55.0f, 70.0f, 85.0f, 100.0f, 115.0f, 130.0f, 145.0f};
     float sizeFac[8] = {1.0f, 0.85f, 0.70f, 0.57f, 0.45f, 0.34f, 0.24f, 0.15f};
     for (int i = 0; i < 8; i++) {
-        float rot = s_time * angVel[i] * speedMult + i * 22.5f;
+        float rot = s_time * angVel[i] * s_speedLerp + i * 22.5f;
         float s = r_core * sizeFac[i];
         Vector2 c = {(float)cx, (float)cy};
         int baseAlpha = (i == 0) ? 80 + (int)(40 * sinf(s_time * 0.5f + i)) : (120 - i * 12 > 40 ? 120 - i * 12 : 40);
-        Color fill = (i == 3) ? alpha(held ? (Color){0,255,100,80} : col, 40) : BLANK;
+        Color fill = (i == 3) ? alpha(s_octagon_held ? (Color){0,255,100,80} : col, 40) : BLANK;
         for (int g = 6; g >= 0; g--) {
-            float gr = rot - g * dt * angVel[i] * speedMult;
+            float gr = rot - g * dt * angVel[i] * s_speedLerp;
             int ga = baseAlpha * (7 - g) / 8;
             if (g == 0) {
                 if (fill.a > 0) DrawPoly(c, 4, s, gr, fill);
