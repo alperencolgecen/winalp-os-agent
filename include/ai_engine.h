@@ -20,6 +20,7 @@ void  ai_engine_reset_context(void);
 void  ai_engine_unload(void);
 float ai_engine_tokens_per_sec(void);
 int   ai_engine_context_usage(void);
+bool  ai_engine_is_vlm(void);
 
 #ifdef __cplusplus
 }

@@ -9,6 +9,7 @@ static struct llama_model   *s_model = NULL;
 static struct llama_context *s_ctx   = NULL;
 static struct llama_sampler *s_smpl  = NULL;
 static int s_n_ctx = 0;
+static bool s_is_vlm = false; /* true if model has separate encoder (vision-language) */
 
 /* System prompt (set once after model load) */
 #define MAX_SYS_PROMPT 16384
@@ -106,6 +107,11 @@ bool ai_engine_load(const char *model_path, int n_gpu_layers) {
     s_history_count = 0;
     s_history_head  = 0;
     s_ctx_usage_pct = 0;
+
+    /* Check if this is a vision-language model (has separate encoder) */
+    s_is_vlm = llama_model_has_encoder(s_model);
+    if (s_is_vlm)
+        winalp_log(WINALP_LOG_INFO, "AI: VLM model detected (encoder present)");
 
     winalp_log(WINALP_LOG_INFO, "AI: engine ready (ctx=%d)", s_n_ctx);
     return true;
@@ -260,6 +266,10 @@ void ai_engine_unload(void) {
     s_history_count = 0;
     s_history_head  = 0;
     winalp_log(WINALP_LOG_INFO, "AI: engine unloaded");
+}
+
+bool ai_engine_is_vlm(void) {
+    return s_is_vlm;
 }
 
 float ai_engine_tokens_per_sec(void) {

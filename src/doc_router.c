@@ -1,6 +1,7 @@
 #include "../include/doc_router.h"
 #include "../include/ocr_engine.h"
 #include "../include/vision_engine.h"
+#include "../include/ai_engine.h"
 #include "../include/logger.h"
 #include <stdio.h>
 #include <string.h>
@@ -51,10 +52,12 @@ bool doc_router_process_image(const unsigned char *bitmap, int width, int height
     if (!bitmap || !out_text) return false;
     *out_text = NULL;
 
-    if (s_vlm_available) {
-        /* VLM path — currently stub, would use mtmd library */
-        winalp_log(WINALP_LOG_INFO, "doc_router: VLM available but mtmd not yet integrated — falling back to OCR");
-        /* Fall through to OCR for now */
+    if (s_vlm_available && ai_engine_is_vlm()) {
+        /* VLM path — model has encoder but mtmd/clip library not linked yet */
+        winalp_log(WINALP_LOG_INFO, "doc_router: VLM loaded but mtmd not integrated — using OCR fallback");
+    } else if (s_vlm_available) {
+        /* mmproj found but current model isn't VLM */
+        winalp_log(WINALP_LOG_INFO, "doc_router: mmproj found but model is not VLM");
     }
 
     /* OCR path — use Windows built-in OCR engine */
