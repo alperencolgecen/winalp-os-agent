@@ -37,7 +37,8 @@ C_SRCS = $(SRCDIR)/main.c \
          $(SRCDIR)/prompt_engine.c \
           $(SRCDIR)/plugin_manager.c \
           $(SRCDIR)/thread_mutex.c \
-          $(SRCDIR)/dpapi_crypt.c
+          $(SRCDIR)/dpapi_crypt.c \
+          $(SRCDIR)/sys_diag.c
 
 # C++ source files (project modules + ImGui + ImPlot + raylib backend)
 CXX_SRCS = $(SRCDIR)/ui_render.cpp \
