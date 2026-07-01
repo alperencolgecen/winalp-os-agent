@@ -20,6 +20,19 @@
 #include "../include/vision_engine.h"
 #include "../include/sys_diag.h"
 #include "../include/doc_router.h"
+#include "../include/tts_engine.h"
+
+#define MAX_PCM_SAMPLES (16000 * 15) /* 15 seconds at 16kHz */
+static float s_pcm_buf[MAX_PCM_SAMPLES];
+static int s_pcm_count = 0;
+
+static void on_stt_result(const char *text, void *ud) {
+    (void)ud;
+    if (!text || !text[0]) return;
+    winalp_log(WINALP_LOG_INFO, "main: push-to-talk: %s", text);
+    memory_store_append_message("user", "mic", text);
+    thread_pool_send_text(text);
+}
 
 static bool confirm_cb(const char *desc, void *ud) {
     (void)ud;
@@ -176,14 +189,43 @@ int main(void) {
     vision_engine_init();
     thread_pool_start_all();
 
+    tts_engine_init();
     ui_render_init(1280, 720, "WinAlp AI Assistant");
 
     bool waiting_for_ai = false;
     char vision_buf[4096] = {0};
     int ctx_counter = 0;
 
+    bool was_octagon_held = false;
+
     while (!ui_render_should_close()) {
         float amplitude = mic_ok ? audio_capture_rms() : 0.5f;
+
+        /* Push-to-talk via octagon hold */
+        {
+            bool held = ui_render_is_octagon_held();
+            if (held && !was_octagon_held) {
+                s_pcm_count = 0;
+                audio_capture_set_exclusive(true);
+                if (stt_engine_is_loaded())
+                    winalp_log(WINALP_LOG_INFO, "main: push-to-talk started");
+                else
+                    winalp_log(WINALP_LOG_WARN, "main: STT not loaded - cannot record");
+            }
+            if (held && stt_engine_is_loaded()) {
+                int n = audio_capture_read(s_pcm_buf + s_pcm_count,
+                                           MAX_PCM_SAMPLES - s_pcm_count);
+                if (n > 0) s_pcm_count += n;
+            }
+            if (!held && was_octagon_held) {
+                audio_capture_set_exclusive(false);
+                if (s_pcm_count > 0 && stt_engine_is_loaded()) {
+                    winalp_log(WINALP_LOG_INFO, "main: push-to-talk ended, %d samples", s_pcm_count);
+                    stt_engine_process(s_pcm_buf, s_pcm_count, on_stt_result, NULL);
+                }
+            }
+            was_octagon_held = held;
+        }
 
         /* Poll for keyboard text input — send to background AI thread */
         {
@@ -224,6 +266,7 @@ int main(void) {
             }
             ui_render_push_chat("assistant", response, "[AI]");
             memory_store_append_message("assistant", "ai", response);
+            tts_engine_speak_async(response);
             waiting_for_ai = false;
         }
 
@@ -282,9 +325,11 @@ int main(void) {
         ui_render_frame(state, amplitude);
     }
 
+    tts_engine_stop();
     thread_pool_stop_all();
     vision_engine_shutdown();
     ui_render_shutdown();
+    tts_engine_shutdown();
     audio_capture_stop();
     stt_engine_unload();
     ai_engine_unload();

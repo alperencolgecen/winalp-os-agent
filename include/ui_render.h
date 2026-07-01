@@ -27,6 +27,7 @@ char *ui_render_model_select(ModelEntry *models, int n_models);
 bool ui_render_confirm_blocking(const char *title, const char *msg);
 
 /* Keyboard text input — poll in main loop */
+bool ui_render_is_octagon_held(void);
 bool ui_render_has_text_input(void);
 void ui_render_get_text_input(char *out, int out_len);
 

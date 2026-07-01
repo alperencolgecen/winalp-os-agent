@@ -18,8 +18,8 @@ LDFLAGS  = -Llib/raylib/lib \
            -Llib/whisper -lwhisper \
            -Llib/llama -lllama -lggml -lggml-cpu -lggml-base \
            -Llib/lua -llua \
-           -lraylib -lopengl32 -lgdi32 -lwinmm -lole32 -luuid -ldxgi -ld3d11 \
-            -lksuser -lcrypt32 -lm -liphlpapi \
+            -lraylib -lopengl32 -lgdi32 -lwinmm -lole32 -luuid -ldxgi -ld3d11 \
+            -lksuser -lcrypt32 -lm -liphlpapi -lsapi \
            -static -lstdc++ -lwinpthread -fopenmp \
            -Wl,--allow-multiple-definition
 
@@ -46,7 +46,8 @@ C_SRCS = $(SRCDIR)/main.c \
            $(SRCDIR)/thread_pool.c \
             $(SRCDIR)/doc_router.c \
             $(SRCDIR)/vlm_engine.c \
-            $(SRCDIR)/sys_monitor.c
+            $(SRCDIR)/sys_monitor.c \
+            $(SRCDIR)/tts_engine.c
 
 # C++ source files (project modules + ImGui + ImPlot + raylib backend)
 CXX_SRCS = $(SRCDIR)/ui_render.cpp \
