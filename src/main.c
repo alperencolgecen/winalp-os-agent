@@ -155,11 +155,34 @@ int main(void) {
             winalp_log(WINALP_LOG_INFO, "main: vision: %s", vision);
         }
 
-        /* Context tracker */
+        /* Context tracker + profile + task strip (throttled) */
         if (++ctx_counter % 30 == 0) {
             char ctx[256];
             context_tracker_poll(ctx, sizeof(ctx));
+
+            /* Append vision context if available */
+            if (vision_buf[0]) {
+                size_t vlen = strlen(vision_buf);
+                size_t clen = strlen(ctx);
+                if (clen + vlen + 4 < sizeof(ctx)) {
+                    snprintf(ctx + clen, sizeof(ctx) - clen, " | OCR: %s", vision_buf);
+                }
+            }
             ui_render_set_context_label(ctx);
+        }
+
+        /* Profile label every 120 frames */
+        if (ctx_counter % 120 == 0) {
+            char name[256] = "";
+            if (memory_store_get_profile("name", name, sizeof(name)))
+                ui_render_set_profile_label(name);
+        }
+
+        /* Task strip every 120 frames */
+        if (ctx_counter % 120 == 0) {
+            char tasks[4096];
+            if (memory_store_get_tasks(tasks, sizeof(tasks)) && tasks[0] != '[')
+                ui_render_set_task_strip(tasks);
         }
 
         /* Agent state for orb animation */
