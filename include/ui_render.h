@@ -25,6 +25,7 @@ void ui_render_frame(AgentState state, float amplitude);
 void ui_render_push_chat(const char *role, const char *text, const char *source_icon);
 void ui_render_set_context_label(const char *label);
 void ui_render_set_profile_label(const char *label);
+void ui_render_set_task_strip(const char *tasks);
 bool ui_render_should_close(void);
 void ui_render_shutdown(void);
 

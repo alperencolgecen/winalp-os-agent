@@ -25,6 +25,20 @@ static bool s_chatScrolled = false;
 
 static ImGuiTextFilter s_chatFilter;
 
+/* Waveform history */
+#define WAVE_LEN 256
+static float s_waveform[WAVE_LEN];
+static int   s_wavePos;
+
+/* Overlay state */
+static bool  s_overlay_active;
+static char  s_overlay_title[128];
+static char  s_overlay_msg[512];
+static bool  s_overlay_result;
+
+/* Task strip data */
+static char s_task_strip[1024] = "";
+
 /* 3D orb */
 static Camera3D s_orbCamera = { 0 };
 static float s_orbTime = 0.0f;
@@ -143,6 +157,82 @@ static void state_color_rgba(AgentState state, float out[4]) {
     }
 }
 
+/* Update waveform ring buffer with current amplitude */
+static void waveform_push(float amplitude) {
+    s_waveform[s_wavePos] = amplitude;
+    s_wavePos = (s_wavePos + 1) % WAVE_LEN;
+}
+
+/* Draw waveform at bottom of screen */
+static void ui_draw_waveform(void) {
+    int wy = s_height - 60;
+    int wh = 40;
+    int wx = 200;
+    int ww = s_width - 400;
+
+    DrawRectangleGradientV(wx, wy, ww, wh,
+                           (Color){ 8, 12, 20, 0 },
+                           (Color){ 0, 212, 255, 12 });
+    DrawRectangleLines(wx, wy, ww, wh, (Color){ 0, 212, 255, 30 });
+
+    for (int i = 1; i < ww; i++) {
+        int idx0 = (s_wavePos + (i - 1) * WAVE_LEN / ww) % WAVE_LEN;
+        int idx1 = (s_wavePos + i * WAVE_LEN / ww) % WAVE_LEN;
+        int x0 = wx + i - 1;
+        int x1 = wx + i;
+        int y0 = wy + wh / 2 - (int)(s_waveform[idx0] * (wh / 2));
+        int y1 = wy + wh / 2 - (int)(s_waveform[idx1] * (wh / 2));
+        DrawLine(x0, y0, x1, y1, (Color){ 0, 212, 255, 100 });
+    }
+}
+
+/* Action confirmation overlay */
+bool ui_render_show_overlay(const char *title, const char *msg) {
+    s_overlay_active = true;
+    strncpy(s_overlay_title, title ? title : "Confirm", sizeof(s_overlay_title) - 1);
+    strncpy(s_overlay_msg, msg ? msg : "", sizeof(s_overlay_msg) - 1);
+    s_overlay_result = false;
+    return s_overlay_result;
+}
+
+static void ui_draw_overlay(void) {
+    if (!s_overlay_active) return;
+
+    /* Dim background */
+    DrawRectangle(0, 0, s_width, s_height, (Color){ 0, 0, 0, 120 });
+
+    /* Modal box */
+    int mw = 400, mh = 150;
+    int mx = (s_width - mw) / 2, my = (s_height - mh) / 2;
+    DrawRectangle(mx, my, mw, mh, (Color){ 15, 25, 40, 230 });
+    DrawRectangleLines(mx, my, mw, mh, (Color){ 0, 212, 255, 80 });
+
+    DrawText(s_overlay_title, mx + 20, my + 15, 18, (Color){ 0, 212, 255, 255 });
+    DrawText(s_overlay_msg, mx + 20, my + 45, 14, (Color){ 180, 190, 200, 255 });
+
+    /* Yes button */
+    Rectangle yBtn = { (float)(mx + 80), (float)(my + 100), 100, 30 };
+    DrawRectangleRec(yBtn, (Color){ 0, 180, 80, 200 });
+    DrawText("YES", (int)yBtn.x + 30, (int)yBtn.y + 6, 14, WHITE);
+
+    /* No button */
+    Rectangle nBtn = { (float)(mx + 220), (float)(my + 100), 100, 30 };
+    DrawRectangleRec(nBtn, (Color){ 180, 40, 40, 200 });
+    DrawText("NO", (int)nBtn.x + 32, (int)nBtn.y + 6, 14, WHITE);
+
+    if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+        Vector2 mp = GetMousePosition();
+        if (CheckCollisionPointRec(mp, yBtn)) {
+            s_overlay_result = true;
+            s_overlay_active = false;
+        }
+        if (CheckCollisionPointRec(mp, nBtn)) {
+            s_overlay_result = false;
+            s_overlay_active = false;
+        }
+    }
+}
+
 static void ui_draw_orb(AgentState state, float amplitude) {
     float radius = 1.8f + amplitude * 0.4f;
 
@@ -220,7 +310,18 @@ static void ui_draw_top_strip(void) {
     ImGui::Text("WinAlp v%d.%d.%d", WINALP_VERSION_MAJOR, WINALP_VERSION_MINOR, WINALP_VERSION_PATCH);
     if (s_contextLabel[0]) { ImGui::SameLine(); ImGui::Text(" | %s", s_contextLabel); }
     if (s_profileLabel[0]) { ImGui::SameLine(); ImGui::TextDisabled(" | %s", s_profileLabel); }
+    /* Task strip */
+    if (s_task_strip[0]) {
+        ImGui::SameLine();
+        ImGui::TextDisabled(" | ");
+        ImGui::SameLine();
+        ImGui::TextColored(ImVec4(0.0f, 0.83f, 0.71f, 1.0f), "%s", s_task_strip);
+    }
     ImGui::End();
+}
+
+void ui_render_set_task_strip(const char *tasks) {
+    strncpy(s_task_strip, tasks ? tasks : "", sizeof(s_task_strip) - 1);
 }
 
 static void ui_draw_left_panel(void) {
@@ -323,16 +424,20 @@ void ui_render_frame(AgentState state, float amplitude) {
     s_width = GetScreenWidth();
     s_height = GetScreenHeight();
 
+    waveform_push(amplitude);
+
     ImGui_ImplRaylib_NewFrame();
 
     BeginDrawing();
     ClearBackground((Color){ 8, 12, 20, 255 });
 
     ui_draw_orb(state, amplitude);
+    ui_draw_waveform();
     ui_draw_top_strip();
     ui_draw_left_panel();
     ui_draw_right_panel();
     ui_draw_bottom_chat();
+    ui_draw_overlay();
 
     ImGui_ImplRaylib_RenderDrawData();
     EndDrawing();
