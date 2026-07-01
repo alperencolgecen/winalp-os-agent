@@ -149,14 +149,97 @@ bool memory_store_get_tasks(char *out_json, int out_len) {
     return true;
 }
 
+/* quick bracket-balance JSON validation */
+static bool json_is_valid(const char *buf) {
+    int brace = 0, brack = 0, in_str = 0;
+    for (const char *p = buf; *p; p++) {
+        if (*p == '"' && (p == buf || *(p-1) != '\\')) in_str = !in_str;
+        if (in_str) continue;
+        if (*p == '{') brace++;
+        if (*p == '}') brace--;
+        if (*p == '[') brack++;
+        if (*p == ']') brack--;
+        if (brace < 0 || brack < 0) return false;
+    }
+    return brace == 0 && brack == 0;
+}
+
+static void cache_prune(void) {
+    char search[1024]; snprintf(search, sizeof(search), "%s\\cache\\*", s_base);
+    WIN32_FIND_DATA fd; HANDLE h = FindFirstFile(search, &fd);
+    if (h == INVALID_HANDLE_VALUE) return;
+    __int64 now;
+    GetSystemTimeAsFileTime((FILETIME*)&now);
+    do {
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+        __int64 ft = ((__int64)fd.ftLastWriteTime.dwHighDateTime << 32)
+                   | (__int64)fd.ftLastWriteTime.dwLowDateTime;
+        __int64 age_days = (now - ft) / (__int64)10000000 / (__int64)86400;
+        if (age_days > 7) {
+            char full[1024]; snprintf(full, sizeof(full), "%s\\cache\\%s", s_base, fd.cFileName);
+            DeleteFile(full);
+        }
+    } while (FindNextFile(h, &fd));
+    FindClose(h);
+}
+
 bool memory_store_integrity_check(void) {
     char path[1024]; snprintf(path, sizeof(path), "%s\\profile.json", s_base);
+
+    /* validate profile.json */
     FILE *f = fopen(path, "r");
-    if (!f) { /* fresh install */ return true; }
-    fseek(f, 0, SEEK_END); long sz = ftell(f); fclose(f);
-    if (sz > 0) {
+    if (f) {
+        fseek(f, 0, SEEK_END); long sz = ftell(f);
+        if (sz > 0) {
+            rewind(f);
+            char *buf = (char*)malloc((size_t)sz + 1);
+            if (buf) {
+                fread(buf, 1, (size_t)sz, f); buf[sz] = '\0';
+                if (!json_is_valid(buf)) {
+                    winalp_log(WINALP_LOG_WARN, "memory_store: profile.json corrupt — rebuilding");
+                    fclose(f);
+                    free(buf);
+                    save_profile(); /* overwrite with current in-memory state */
+                    winalp_log(WINALP_LOG_INFO, "memory_store: profile.json rebuilt");
+                    cache_prune();
+                    return true;
+                }
+                free(buf);
+            }
+        }
+        fclose(f);
         winalp_log(WINALP_LOG_INFO, "memory_store: integrity check OK (%s, %ldB)", path, sz);
     }
+
+    /* validate each task file */
+    char search[1024]; snprintf(search, sizeof(search), "%s\\tasks\\*.json", s_base);
+    WIN32_FIND_DATA fd; HANDLE h = FindFirstFile(search, &fd);
+    if (h != INVALID_HANDLE_VALUE) {
+        do {
+            char fp[1024]; snprintf(fp, sizeof(fp), "%s\\tasks\\%s", s_base, fd.cFileName);
+            FILE *tf = fopen(fp, "r");
+            if (tf) {
+                fseek(tf, 0, SEEK_END); long tsz = ftell(tf); rewind(tf);
+                if (tsz > 0) {
+                    char *tb = (char*)malloc((size_t)tsz + 1);
+                    if (tb) {
+                        fread(tb, 1, (size_t)tsz, tf); tb[tsz] = '\0';
+                        if (!json_is_valid(tb)) {
+                            winalp_log(WINALP_LOG_WARN, "memory_store: corrupt task %s — removing", fd.cFileName);
+                            fclose(tf); free(tb);
+                            DeleteFile(fp);
+                            continue;
+                        }
+                        free(tb);
+                    }
+                }
+                fclose(tf);
+            }
+        } while (FindNextFile(h, &fd));
+        FindClose(h);
+    }
+
+    cache_prune();
     return true;
 }
 
