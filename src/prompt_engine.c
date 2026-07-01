@@ -53,6 +53,32 @@ bool prompt_engine_init(const char *prompts_dir) {
     if (!prompts_dir) return false;
     strncpy(s_dir, prompts_dir, sizeof(s_dir) - 1);
     s_active = -1;
+
+    /* Auto-create prompts/ directory if missing */
+    CreateDirectoryA(prompts_dir, NULL);
+
+    /* Create default.txt if the directory is empty (no .txt files yet) */
+    {
+        char search[1024]; snprintf(search, sizeof(search), "%s\\*.txt", s_dir);
+        WIN32_FIND_DATA fd;
+        HANDLE h = FindFirstFileA(search, &fd);
+        if (h == INVALID_HANDLE_VALUE) {
+            /* No .txt files — write default.txt */
+            char defpath[1024]; snprintf(defpath, sizeof(defpath), "%s\\default.txt", s_dir);
+            FILE *f = fopen(defpath, "w");
+            if (f) {
+                const char *default_content =
+                    "You are a helpful AI assistant. Respond conversationally.\n"
+                    "When the user asks you to perform file or system actions,\n"
+                    "output a JSON object with action/path/content fields.\n";
+                fputs(default_content, f);
+                fclose(f);
+                winalp_log(WINALP_LOG_INFO, "prompt_engine: created prompts/default.txt");
+            }
+        }
+        FindClose(h);
+    }
+
     load_templates();
     /* default: first template if none set */
     if (s_active < 0 && s_n > 0) s_active = 0;

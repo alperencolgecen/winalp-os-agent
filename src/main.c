@@ -33,6 +33,12 @@ int main(void) {
     memory_store_init("profile");
     memory_store_integrity_check();
 
+    /* Auto-create required directories */
+    CreateDirectoryA("prompts", NULL);
+    CreateDirectoryA("models", NULL);
+    CreateDirectoryA("scripts", NULL);
+    CreateDirectoryA("work", NULL);
+
     /* STT */
     const char *stt_path = "models/ggml-tiny.bin";
     if (stt_engine_load(stt_path))
