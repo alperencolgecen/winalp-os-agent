@@ -93,9 +93,11 @@ void audio_capture_set_exclusive(bool excl) {
     s_exclusive = excl;
 }
 
-int audio_capture_read(float *buf, int max_samples) {
-    if (s_exclusive) return 0;
+bool audio_capture_is_exclusive(void) {
+    return s_exclusive;
+}
 
+int audio_capture_read(float *buf, int max_samples) {
     EnterCriticalSection(&s_lock);
     int wp = s_writePos;
     LeaveCriticalSection(&s_lock);

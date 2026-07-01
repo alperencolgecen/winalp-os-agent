@@ -30,6 +30,7 @@ static int s_pcm_count = 0;
 
 static void on_stt_result(const char *text, void *ud);
 static void on_partial_stt(const char *text, void *ud);
+static bool s_waiting_for_ai = false;
 
 struct SttJob { float *buf; int count; int partial; };
 
@@ -53,7 +54,9 @@ static void on_stt_result(const char *text, void *ud) {
     if (!text || !text[0]) return;
     winalp_log(WINALP_LOG_INFO, "main: push-to-talk: %s", text);
     ui_render_set_transcript(text);
+    ui_render_push_chat("user", text, "[mic]");
     memory_store_append_message("user", "mic", text);
+    s_waiting_for_ai = true;
     thread_pool_send_text(text);
 }
 
@@ -258,7 +261,6 @@ int main(void) {
     tts_engine_init();
     ui_render_init(1280, 720, "WinAlp AI Assistant");
 
-    bool waiting_for_ai = false;
     char vision_buf[4096] = {0};
     int ctx_counter = 0;
 
@@ -333,19 +335,10 @@ int main(void) {
                     winalp_log(WINALP_LOG_INFO, "main: keyboard input (%d chars)", (int)strlen(kb_input));
                     ui_render_push_chat("user", kb_input, "[key]");
                     memory_store_append_message("user", "key", kb_input);
-                    waiting_for_ai = true;
+                    s_waiting_for_ai = true;
                     thread_pool_send_text(kb_input);
                 }
             }
-        }
-
-        /* Poll for STT transcripts from the background STT thread */
-        char transcript[4096];
-        if (thread_pool_get_transcript(transcript, sizeof(transcript))) {
-            winalp_log(WINALP_LOG_INFO, "main: transcript received (%d chars)", (int)strlen(transcript));
-            ui_render_push_chat("user", transcript, "[mic]");
-            memory_store_append_message("user", "mic", transcript);
-            waiting_for_ai = true;
         }
 
         /* Poll for AI responses */
@@ -364,7 +357,7 @@ int main(void) {
             ui_render_push_chat("assistant", response, "[AI]");
             memory_store_append_message("assistant", "ai", response);
             tts_engine_speak_async(response);
-            waiting_for_ai = false;
+            s_waiting_for_ai = false;
         }
 
         /* Poll for vision OCR results */
@@ -417,7 +410,7 @@ int main(void) {
         }
 
         /* Agent state for orb animation */
-        AgentState state = waiting_for_ai ? AGENT_STATE_THINKING : AGENT_STATE_LISTENING;
+        AgentState state = s_waiting_for_ai ? AGENT_STATE_THINKING : AGENT_STATE_LISTENING;
 
         ui_render_frame(state, amplitude);
     }

@@ -129,6 +129,15 @@ static DWORD WINAPI stt_thread(LPVOID arg) {
                     silence_ms += 50;
                 }
 
+                /* If push-to-talk is active, skip VAD capture */
+                if (audio_capture_is_exclusive()) {
+                    speech_ms = 0;
+                    silence_ms = 0;
+                    vad_state = 0;
+                    Sleep(50);
+                    break;
+                }
+
                 /* End capture on: enough silence OR max speech time */
                 if (silence_ms >= VAD_SILENCE_MS || speech_ms >= VAD_MAX_SPEECH_MS) {
                     if (!s_running) break;
