@@ -62,6 +62,13 @@ static MsgQueue s_ai_response_q;
 static MsgQueue s_vision_q;
 
 /* ---------- STT thread ---------- */
+/* Called by stt_engine_process on STT thread — pushes result to transcript queue */
+static void on_stt_result(const char *text, void *ud) {
+    (void)ud;
+    if (text && text[0])
+        queue_push(&s_transcript_q, text);
+}
+
 static DWORD WINAPI stt_thread(LPVOID arg) {
     (void)arg;
     winalp_log(WINALP_LOG_INFO, "thread_pool: STT thread started");
@@ -80,9 +87,7 @@ static DWORD WINAPI stt_thread(LPVOID arg) {
             float pcm[16000 * 2];
             int n = audio_capture_read(pcm, 16000 * 2);
             if (n > 0 && stt_engine_is_loaded()) {
-                char result[4096] = "";
-                stt_engine_process(pcm, n, /* no callback — use sync */ NULL, NULL);
-                queue_push(&s_transcript_q, result);
+                stt_engine_process(pcm, n, on_stt_result, NULL);
             }
         } else {
             Sleep(50);
@@ -93,6 +98,23 @@ static DWORD WINAPI stt_thread(LPVOID arg) {
 }
 
 /* ---------- AI thread ---------- */
+/* Accumulator passed as userdata to on_ai_token */
+typedef struct {
+    char buf[4096];
+    int  len;
+} AccumState;
+
+static void on_ai_token(const char *token, void *ud) {
+    AccumState *as = (AccumState*)ud;
+    if (!as || !token) return;
+    int n = (int)strlen(token);
+    if (as->len + n < (int)sizeof(as->buf) - 1) {
+        memcpy(as->buf + as->len, token, (size_t)n);
+        as->len += n;
+        as->buf[as->len] = '\0';
+    }
+}
+
 static DWORD WINAPI ai_thread(LPVOID arg) {
     (void)arg;
     winalp_log(WINALP_LOG_INFO, "thread_pool: AI thread started");
@@ -110,26 +132,37 @@ static DWORD WINAPI ai_thread(LPVOID arg) {
             continue;
         }
 
-        /* Run inference */
-        char response[MSG_SIZE] = "";
-        ai_engine_infer(transcript, NULL, NULL);
-        /* The inference writes via callback — simplified: grab latest response */
-        queue_push(&s_ai_response_q, response);
+        /* Run inference with accumulator callback */
+        AccumState as;
+        as.buf[0] = '\0';
+        as.len = 0;
+        ai_engine_infer(transcript, on_ai_token, &as);
+        if (as.len > 0)
+            queue_push(&s_ai_response_q, as.buf);
+        else
+            queue_push(&s_ai_response_q, "(empty response)");
     }
     winalp_log(WINALP_LOG_INFO, "thread_pool: AI thread stopped");
     return 0;
 }
 
 /* ---------- Vision thread ---------- */
+static void on_vision_result(const char *text, void *ud) {
+    (void)ud;
+    if (text && text[0])
+        queue_push(&s_vision_q, text);
+}
+
 static DWORD WINAPI vision_thread(LPVOID arg) {
     (void)arg;
     winalp_log(WINALP_LOG_INFO, "thread_pool: Vision thread started");
 
+    vision_engine_start_capture(on_vision_result, NULL);
     while (s_running) {
-        /* Poll vision engine once per second */
-        queue_push(&s_vision_q, "(screen capture snapshot)");
-        Sleep(1000);
+        vision_engine_poll();
+        Sleep(200); /* 5 fps */
     }
+    vision_engine_stop_capture();
     winalp_log(WINALP_LOG_INFO, "thread_pool: Vision thread stopped");
     return 0;
 }
