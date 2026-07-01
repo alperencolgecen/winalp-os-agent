@@ -17,6 +17,10 @@ bool memory_store_get_profile(const char *key, char *out, int out_len);
 /* Task CRUD */
 bool memory_store_upsert_task(const char *task_json);
 bool memory_store_get_tasks(char *out_json, int out_len);
+bool memory_store_delete_task(const char *task_id);
+bool memory_store_update_task(const char *task_id,
+                               const char *field,
+                               const char *value);
 
 /* Integrity check on startup */
 bool memory_store_integrity_check(void);

@@ -122,6 +122,73 @@ bool memory_store_upsert_task(const char *task_json) {
     return true;
 }
 
+bool memory_store_delete_task(const char *task_id) {
+    if (!s_init || !task_id) return false;
+    char path[1024]; snprintf(path, sizeof(path), "%s\\tasks\\%s.json", s_base, task_id);
+    FILE *f = fopen(path, "r");
+    if (!f) return false;
+    fclose(f);
+    return DeleteFile(path) != 0;
+}
+
+bool memory_store_update_task(const char *task_id,
+                               const char *field,
+                               const char *value) {
+    if (!s_init || !task_id || !field) return false;
+    char path[1024]; snprintf(path, sizeof(path), "%s\\tasks\\%s.json", s_base, task_id);
+    FILE *f = fopen(path, "r");
+    if (!f) return false;
+    fseek(f, 0, SEEK_END); long sz = ftell(f); rewind(f);
+    char *buf = (char*)malloc((size_t)sz + 1);
+    if (!buf) { fclose(f); return false; }
+    fread(buf, 1, (size_t)sz, f); buf[sz] = '\0'; fclose(f);
+
+    /* simple field replacement inside JSON */
+    char search_key[256]; snprintf(search_key, sizeof(search_key), "\"%s\"", field);
+    char *val_start = strstr(buf, search_key);
+    if (!val_start) { free(buf); return false; }
+    val_start = strchr(val_start, ':');
+    if (!val_start) { free(buf); return false; }
+    val_start++;
+    while (*val_start == ' ') val_start++;
+    /* determine current value boundaries */
+    char *v_end;
+    if (*val_start == '"') {
+        val_start++;
+        v_end = strchr(val_start, '"');
+    } else {
+        v_end = strchr(val_start, ',');
+        if (!v_end) v_end = strchr(val_start, '}');
+    }
+    if (!v_end) { free(buf); return false; }
+    /* build new JSON */
+    size_t prefix_len = (size_t)(val_start - buf);
+    size_t suffix_len = (size_t)(sz - (v_end - buf));
+    size_t val_len = value ? strlen(value) : 0;
+    int quote = (!value || value[0] == '{' || strchr(value, ':') || strchr(value, '}')) ? 0 : 1;
+    size_t new_sz = prefix_len + (size_t)(quote ? 1 : 0) +
+                    (value ? val_len : 4) + (size_t)(quote ? 1 : 0) +
+                    suffix_len + 1;
+    char *new_buf = (char*)malloc(new_sz);
+    if (!new_buf) { free(buf); return false; }
+    char *wp = new_buf;
+    memcpy(wp, buf, prefix_len); wp += prefix_len;
+    if (quote) *wp++ = '"';
+    if (value) { memcpy(wp, value, val_len); wp += val_len; }
+    else { memcpy(wp, "null", 4); wp += 4; }
+    if (quote) *wp++ = '"';
+    memcpy(wp, v_end, suffix_len); wp += suffix_len;
+    *wp = '\0';
+    free(buf);
+
+    f = fopen(path, "w");
+    if (!f) { free(new_buf); return false; }
+    fputs(new_buf, f);
+    fclose(f);
+    free(new_buf);
+    return true;
+}
+
 bool memory_store_get_tasks(char *out_json, int out_len) {
     if (!s_init || !out_json) return false;
     out_json[0] = '[';
