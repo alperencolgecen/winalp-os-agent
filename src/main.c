@@ -26,6 +26,18 @@
 static float s_pcm_buf[MAX_PCM_SAMPLES];
 static int s_pcm_count = 0;
 
+static void on_stt_result(const char *text, void *ud);
+
+struct SttJob { float *buf; int count; };
+
+static DWORD WINAPI stt_thread_proc(LPVOID arg) {
+    struct SttJob *job = (struct SttJob*)arg;
+    if (job && job->buf && job->count > 0)
+        stt_engine_process(job->buf, job->count, on_stt_result, NULL);
+    if (job) { free(job->buf); free(job); }
+    return 0;
+}
+
 static void on_stt_result(const char *text, void *ud) {
     (void)ud;
     if (!text || !text[0]) return;
@@ -219,9 +231,20 @@ int main(void) {
             }
             if (!held && was_octagon_held) {
                 audio_capture_set_exclusive(false);
-                if (s_pcm_count > 0 && stt_engine_is_loaded()) {
-                    winalp_log(WINALP_LOG_INFO, "main: push-to-talk ended, %d samples", s_pcm_count);
-                    stt_engine_process(s_pcm_buf, s_pcm_count, on_stt_result, NULL);
+                if (s_pcm_count > 64 && stt_engine_is_loaded()) {
+                    float *copy = (float*)malloc(s_pcm_count * sizeof(float));
+                    if (copy) {
+                        memcpy(copy, s_pcm_buf, s_pcm_count * sizeof(float));
+                        struct SttJob *job = (struct SttJob*)malloc(sizeof(struct SttJob));
+                        if (job) {
+                            job->buf = copy;
+                            job->count = s_pcm_count;
+                            HANDLE h = CreateThread(NULL, 0, stt_thread_proc, job, 0, NULL);
+                            if (h) CloseHandle(h); else { free(job->buf); free(job); }
+                        } else {
+                            free(copy);
+                        }
+                    }
                 }
             }
             was_octagon_held = held;

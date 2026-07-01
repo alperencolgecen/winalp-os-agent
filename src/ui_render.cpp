@@ -69,7 +69,8 @@ static void load_ui_font(void) {
         "C:/Windows/Fonts/tahoma.ttf",
     };
     for (int i = 0; i < 3; i++) {
-        Font f = LoadFontEx(paths[i], 14, s_font_cps, FONT_CP_CNT);
+        Font f = LoadFontEx(paths[i], 64, s_font_cps, FONT_CP_CNT);
+        if (f.glyphCount > 0) SetTextureFilter(f.texture, TEXTURE_FILTER_BILINEAR);
         if (f.glyphCount > 0) { s_font = f; s_font_loaded = true; return; }
     }
     s_font = GetFontDefault();
@@ -189,20 +190,15 @@ static void draw_arc_reactor(AgentState state, float amplitude) {
     float r_core = 90.0f + amplitude * 10.0f;
     DrawCircleGradient(cx, cy, r_core * 1.5f, alpha(col, 80), (Color){0,0,0,0});
     
-    for(int i=0; i<3; i++) {
-        float a = s_time * 0.5f + i * (3.14159f * 2.0f / 3.0f);
-        Vector2 p1 = {cx + cosf(a)*r_core, cy + sinf(a)*r_core};
-        Vector2 p2 = {cx + cosf(a + 2.0f)*r_core, cy + sinf(a + 2.0f)*r_core};
-        Vector2 p3 = {cx + cosf(a + 4.0f)*r_core, cy + sinf(a + 4.0f)*r_core};
-        DrawTriangleLines(p1, p2, p3, alpha(cyan, 150));
-    }
-    for(int i=0; i<3; i++) {
-        float a = -s_time * 0.3f + i * (3.14159f * 2.0f / 3.0f);
-        Vector2 p1 = {cx + cosf(a)*(r_core*0.8f), cy + sinf(a)*(r_core*0.8f)};
-        Vector2 p2 = {cx + cosf(a + 2.0f)*(r_core*0.8f), cy + sinf(a + 2.0f)*(r_core*0.8f)};
-        Vector2 p3 = {cx + cosf(a + 4.0f)*(r_core*0.8f), cy + sinf(a + 4.0f)*(r_core*0.8f)};
-        DrawTriangle(p1, p2, p3, alpha(col, 40));
-        DrawTriangleLines(p1, p2, p3, alpha(cyan, 200));
+    for (int i = 0; i < 4; i++) {
+        float rot = s_time * (0.4f + i * 0.15f) + i * 22.5f;
+        float s = r_core * (1.0f - i * 0.18f);
+        Vector2 c = {(float)cx, (float)cy};
+        Color outline = (i == 0) ? alpha(cyan, 80 + (int)(40 * sinf(s_time * 0.5f + i)))
+                                 : alpha(cyan, 120 - i * 25);
+        Color fill    = (i == 2) ? alpha(col, 50) : BLANK;
+        if (fill.a > 0) DrawPoly(c, 4, s, rot, fill);
+        DrawPolyLines(c, 4, s, rot, outline);
     }
 
     DrawCircle(cx, cy, 30.0f + amplitude*5.0f, alpha(WHITE, 200));
