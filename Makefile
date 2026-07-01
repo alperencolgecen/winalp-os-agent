@@ -15,7 +15,7 @@ LDFLAGS  = -Llib/raylib/lib \
            -Llib/whisper -lwhisper \
            -Llib/llama -lllama -lggml -lggml-cpu -lggml-base \
            -lraylib -lopengl32 -lgdi32 -lwinmm -lole32 -luuid -ldxgi -ld3d11 \
-           -lksuser \
+            -lksuser -lcrypt32 \
            -static -lstdc++ -lwinpthread -fopenmp
 
 TARGET  = WinAlp.exe
@@ -36,7 +36,8 @@ C_SRCS = $(SRCDIR)/main.c \
          $(SRCDIR)/context_tracker.c \
          $(SRCDIR)/prompt_engine.c \
           $(SRCDIR)/plugin_manager.c \
-          $(SRCDIR)/thread_mutex.c
+          $(SRCDIR)/thread_mutex.c \
+          $(SRCDIR)/dpapi_crypt.c
 
 # C++ source files (project modules + ImGui + ImPlot + raylib backend)
 CXX_SRCS = $(SRCDIR)/ui_render.cpp \
