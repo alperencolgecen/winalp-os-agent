@@ -11,6 +11,7 @@ extern "C" {
 #include <cstdio>
 #include <cmath>
 #include <cstring>
+#include <cstdlib>
 #include "raylib.h"
 
 static int s_width = 1280;
@@ -20,6 +21,7 @@ static bool s_shouldClose = false;
 static char s_contextLabel[256] = "";
 static char s_profileLabel[512] = "";
 static char s_input_buf[512] = "";
+static char s_windows_user[64] = "";
 static bool s_input_pending;
 
 static bool s_overlay_active;
@@ -357,7 +359,7 @@ static void draw_top_bar(void) {
     DrawLine(0, 33, s_width, 33, (Color){0, 212, 255, 8});
 
     DrawText("WINALP OS  v1.0.0", 14, 8, 14, cyan_c);
-    DrawText(s_profileLabel[0] ? s_profileLabel : "Alperen Colgecen",
+    DrawText(s_profileLabel[0] ? s_profileLabel : s_windows_user,
              s_width - 170, 9, 11, cyan_c);
     DrawText("User:", s_width - 220, 9, 11, (Color){180, 190, 200, 255});
 }
@@ -548,6 +550,13 @@ void ui_render_get_text_input(char *out, int out_len) {
 void ui_render_init(int width, int height, const char *title) {
     s_width = width;
     s_height = height;
+
+    const char *env_user = std::getenv("USERNAME");
+    if (env_user && env_user[0]) {
+        strncpy(s_windows_user, env_user, sizeof(s_windows_user) - 1);
+    } else {
+        strncpy(s_windows_user, "User", sizeof(s_windows_user) - 1);
+    }
 
     SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_WINDOW_RESIZABLE);
     InitWindow(width, height, title);
