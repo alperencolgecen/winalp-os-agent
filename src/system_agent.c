@@ -15,10 +15,17 @@ static int  s_brace_depth;
 
 static ConfirmCallback s_confirm_cb;
 static void           *s_confirm_ud;
+static FileContentCallback s_content_cb;
+static void          *s_content_ud;
 
 void system_agent_set_confirm_cb(ConfirmCallback cb, void *ud) {
     s_confirm_cb = cb;
     s_confirm_ud = ud;
+}
+
+void system_agent_set_content_cb(FileContentCallback cb, void *ud) {
+    s_content_cb = cb;
+    s_content_ud = ud;
 }
 
 /* JSON tokeniser states */
@@ -160,6 +167,11 @@ static void exec_action(const char *json) {
             winalp_log(WINALP_LOG_ERROR, "agent: cannot create dir %s", full);
 
     } else if (strcmp(action, "read_file") == 0) {
+        char desc[128]; snprintf(desc, sizeof(desc), "Read file: %s", full);
+        if (s_confirm_cb && !s_confirm_cb(desc, s_confirm_ud)) {
+            winalp_log(WINALP_LOG_INFO, "agent: read cancelled: %s", full);
+            return;
+        }
         HANDLE hFile = CreateFileA(full, GENERIC_READ, FILE_SHARE_READ, NULL,
                                     OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
         if (hFile == INVALID_HANDLE_VALUE) {
@@ -170,6 +182,7 @@ static void exec_action(const char *json) {
         if (!ReadFile(hFile, tmp, BUF_SZ - 1, &n, NULL)) n = 0;
         tmp[n] = '\0'; CloseHandle(hFile);
         winalp_log(WINALP_LOG_INFO, "agent: read %s (%lu bytes)", full, n);
+        if (s_content_cb) s_content_cb(tmp, s_content_ud);
 
     } else if (strcmp(action, "delete_file") == 0) {
         char desc[128]; snprintf(desc, sizeof(desc), "Delete file: %s", full);

@@ -13,4 +13,8 @@ void system_agent_flush(void);
 typedef bool (*ConfirmCallback)(const char *description, void *ud);
 void system_agent_set_confirm_cb(ConfirmCallback cb, void *ud);
 
+/* Register a callback to receive read_file content */
+typedef void (*FileContentCallback)(const char *content, void *ud);
+void system_agent_set_content_cb(FileContentCallback cb, void *ud);
+
 #endif /* SYSTEM_AGENT_H */
