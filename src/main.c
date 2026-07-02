@@ -66,11 +66,6 @@ static bool confirm_cb(const char *desc, void *ud) {
     return ui_render_confirm_blocking("WinAlp — Confirm Action", desc);
 }
 
-static LONG WINAPI crash_filter(EXCEPTION_POINTERS *ep) {
-    (void)ep;
-    winalp_log(WINALP_LOG_ERROR, "CRASH: unhandled exception — continuing");
-    return EXCEPTION_EXECUTE_HANDLER;
-}
 static void sig_handler(int sig) {
     winalp_log(WINALP_LOG_ERROR, "CRASH: signal %d — continuing", sig);
 }
@@ -82,7 +77,6 @@ int main(void) {
                WINALP_VERSION_MAJOR, WINALP_VERSION_MINOR, WINALP_VERSION_PATCH);
 
     /* Install crash handlers to prevent unexpected exit */
-    SetUnhandledExceptionFilter(crash_filter);
     signal(SIGSEGV, sig_handler);
     signal(SIGABRT, sig_handler);
     signal(SIGFPE,  sig_handler);
