@@ -24,42 +24,8 @@
 #include "../include/doc_router.h"
 #include "../include/tts_engine.h"
 
-#define MAX_PCM_SAMPLES (16000 * 15) /* 15 seconds at 16kHz */
-static float s_pcm_buf[MAX_PCM_SAMPLES];
-static int s_pcm_count = 0;
-
-static void on_stt_result(const char *text, void *ud);
-static void on_partial_stt(const char *text, void *ud);
 static bool s_waiting_for_ai = false;
 static DWORD WINAPI ai_load_thread_proc(LPVOID arg);
-
-struct SttJob { float *buf; int count; int partial; };
-
-static DWORD WINAPI stt_thread_proc(LPVOID arg) {
-    struct SttJob *job = (struct SttJob*)arg;
-    if (job && job->buf && job->count > 0) {
-        TranscriptCallback cb = job->partial ? on_partial_stt : on_stt_result;
-        stt_engine_process(job->buf, job->count, cb, NULL);
-    }
-    if (job) { free(job->buf); free(job); }
-    return 0;
-}
-
-static void on_partial_stt(const char *text, void *ud) {
-    (void)ud;
-    if (text && text[0]) ui_render_set_transcript(text);
-}
-
-static void on_stt_result(const char *text, void *ud) {
-    (void)ud;
-    if (!text || !text[0]) return;
-    winalp_log(WINALP_LOG_INFO, "main: push-to-talk: %s", text);
-    ui_render_set_transcript(text);
-    ui_render_push_chat("user", text, "[mic]");
-    memory_store_append_message("user", "mic", text);
-    s_waiting_for_ai = true;
-    thread_pool_send_text(text);
-}
 
 static bool confirm_cb(const char *desc, void *ud) {
     (void)ud;
@@ -258,67 +224,8 @@ int main(void) {
     char vision_buf[4096] = {0};
     int ctx_counter = 0;
 
-    bool was_octagon_held = false;
-    clock_t last_partial = 0;
-
     while (!ui_render_should_close()) {
         float amplitude = mic_ok ? audio_capture_rms() : 0.5f;
-
-        /* Push-to-talk via octagon hold */
-        {
-            bool held = ui_render_is_octagon_held();
-            if (held && !was_octagon_held) {
-                s_pcm_count = 0;
-                last_partial = clock();
-                audio_capture_set_exclusive(true);
-                if (stt_engine_is_loaded()) {
-                    winalp_log(WINALP_LOG_INFO, "main: push-to-talk started");
-                    ui_render_set_transcript("Listening...");
-                } else {
-                    winalp_log(WINALP_LOG_WARN, "main: STT not loaded - cannot record");
-                }
-            }
-            if (held && stt_engine_is_loaded()) {
-                int n = audio_capture_read(s_pcm_buf + s_pcm_count,
-                                           MAX_PCM_SAMPLES - s_pcm_count);
-                if (n > 0) s_pcm_count += n;
-                /* Partial transcript every ~1.5s */
-                double elapsed = (double)(clock() - last_partial) / CLOCKS_PER_SEC;
-                if (elapsed > 1.5 && s_pcm_count > 16000) {
-                    last_partial = clock();
-                    float *copy = (float*)malloc(s_pcm_count * sizeof(float));
-                    if (copy) {
-                        memcpy(copy, s_pcm_buf, s_pcm_count * sizeof(float));
-                        struct SttJob *job = (struct SttJob*)malloc(sizeof(struct SttJob));
-                        if (job) {
-                            job->buf = copy; job->count = s_pcm_count; job->partial = 1;
-                            HANDLE h = CreateThread(NULL, 0, stt_thread_proc, job, 0, NULL);
-                            if (h) CloseHandle(h); else { free(job->buf); free(job); }
-                        } else { free(copy); }
-                    }
-                }
-            }
-            if (!held && was_octagon_held) {
-                audio_capture_set_exclusive(false);
-                if (s_pcm_count > 64 && stt_engine_is_loaded()) {
-                    float *copy = (float*)malloc(s_pcm_count * sizeof(float));
-                    if (copy) {
-                        memcpy(copy, s_pcm_buf, s_pcm_count * sizeof(float));
-                        struct SttJob *job = (struct SttJob*)malloc(sizeof(struct SttJob));
-                        if (job) {
-                            job->buf = copy;
-                            job->count = s_pcm_count;
-                            job->partial = 0;
-                            HANDLE h = CreateThread(NULL, 0, stt_thread_proc, job, 0, NULL);
-                            if (h) CloseHandle(h); else { free(job->buf); free(job); }
-                        } else {
-                            free(copy);
-                        }
-                    }
-                }
-            }
-            was_octagon_held = held;
-        }
 
         /* Poll for keyboard text input — send to background AI thread */
         {

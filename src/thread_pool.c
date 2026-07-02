@@ -9,6 +9,7 @@
 #include "../include/prompt_engine.h"
 #include "../include/system_agent.h"
 #include "../include/thread_mutex.h"
+#include "../include/ui_render.h"
 #include <windows.h>
 #include <stdio.h>
 #include <string.h>
@@ -65,11 +66,15 @@ static MsgQueue s_ai_response_q;
 static MsgQueue s_vision_q;
 
 /* ---------- STT thread ---------- */
-/* Called by stt_engine_process on STT thread — pushes result to transcript queue */
+/* Called by stt_engine_process on STT thread — shows chat + pushes to AI queue */
 static void on_stt_result(const char *text, void *ud) {
     (void)ud;
-    if (text && text[0])
+    if (text && text[0]) {
+        ui_render_set_transcript(text);
+        ui_render_push_chat("user", text, "[mic]");
+        memory_store_append_message("user", "mic", text);
         queue_push(&s_transcript_q, text);
+    }
 }
 
 /* VAD state machine */

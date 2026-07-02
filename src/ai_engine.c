@@ -4,6 +4,7 @@
 #include "../include/logger.h"
 #include <string.h>
 #include <stdlib.h>
+#include <windows.h>
 
 static struct llama_model   *s_model = NULL;
 static struct llama_context *s_ctx   = NULL;
@@ -206,6 +207,7 @@ void ai_engine_infer(const char *prompt, TokenCallback cb, void *userdata) {
     int resp_len = 0;
 
     while (n_gen < max_gen) {
+        Sleep(0); /* yield to UI thread */
         llama_sampler_reset(s_smpl);
         llama_token new_id = llama_sampler_sample(s_smpl, s_ctx, -1);
 
