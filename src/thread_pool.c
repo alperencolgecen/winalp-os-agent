@@ -283,6 +283,7 @@ static DWORD WINAPI ai_thread(LPVOID arg) {
         RemoveVectoredExceptionHandler(veh);
 
         if (ai_crashed) {
+            ui_render_trigger_emergency(2.0);
             queue_push(&s_ai_response_q, "(AI engine crashed during inference)");
         } else if (as.len > 0) {
             queue_push(&s_ai_response_q, as.buf);

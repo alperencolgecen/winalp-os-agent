@@ -612,6 +612,34 @@ static void draw_quick_status(void) {
     }
 }
 
+/* Emergency flash state */
+static bool s_emergency_active = false;
+static double s_emergency_start = 0;
+static double s_emergency_duration = 0;
+
+void ui_render_trigger_emergency(double duration_sec) {
+    s_emergency_active = true;
+    s_emergency_start = s_time;
+    s_emergency_duration = duration_sec;
+}
+
+static void draw_emergency(void) {
+    if (!s_emergency_active) return;
+    double elapsed = s_time - s_emergency_start;
+    if (elapsed > s_emergency_duration) {
+        s_emergency_active = false;
+        return;
+    }
+    float intensity = (float)(1.0 - elapsed / s_emergency_duration);
+    int alpha_v = (int)(120 * intensity * (0.5f + 0.5f * sinf((float)elapsed * 12.0f)));
+    if (alpha_v < 5) return;
+    DrawRectangle(0, 0, s_width, s_height, (Color){245, 50, 10, (unsigned char)alpha_v});
+    /* Border flash */
+    int bw = 4;
+    DrawRectangle(0, 0, s_width, bw, (Color){245, 158, 11, (unsigned char)(180 * intensity)});
+    DrawRectangle(0, s_height - bw, s_width, bw, (Color){245, 158, 11, (unsigned char)(180 * intensity)});
+}
+
 /* ── Overlay ── */
 static void draw_transcript(void) {
     char txt[4096];
@@ -860,6 +888,7 @@ void ui_render_frame(AgentState state, float amplitude) {
     draw_top_bar();
     draw_chat_panel();
     draw_footer();
+    draw_emergency();
     draw_transcript();
     draw_overlay();
 
