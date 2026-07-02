@@ -209,12 +209,30 @@ static void draw_panel_bg(int x, int y, int w, int h, Color accent) {
     DrawLine(x + w + 1, y + h - 2, x + w + 1, y + h - 18, accent);
 }
 
+/* Orbiting particle state */
+#define N_PARTICLES 24
+static struct { float angle, radius, speed, size; } s_parts[N_PARTICLES];
+static bool s_parts_init;
+
+static void init_particles(void) {
+    if (s_parts_init) return;
+    float radii[] = {150, 200, 260};
+    for (int i = 0; i < N_PARTICLES; i++) {
+        s_parts[i].angle  = (float)i * (3.14159f * 2.0f / (N_PARTICLES / 3));
+        s_parts[i].radius = radii[i / 8];
+        s_parts[i].speed  = (i % 8 < 4) ? 0.6f + (i % 8) * 0.1f : -(0.6f + (i % 8) * 0.1f);
+        s_parts[i].size   = 2.0f + (i % 3) * 0.5f;
+    }
+    s_parts_init = true;
+}
+
 /* ── Jarvis Arc Reactor ── */
 static void draw_arc_reactor(AgentState state, float amplitude) {
     int cx = s_width / 2;
     int cy = s_height / 2;
     float dt = GetFrameTime();
     s_time += dt;
+    init_particles();
 
     if (state != s_lastState) {
         state_color_rgba(state, s_colorTarget);
@@ -276,6 +294,43 @@ static void draw_arc_reactor(AgentState state, float amplitude) {
                 DrawPolyLines(c, 4, s, gr, alpha(sqCol, ga / 2));
             }
         }
+    }
+
+    /* Orbiting particles */
+    float partSpeedMul = (state == AGENT_STATE_THINKING) ? 2.0f :
+                         (state == AGENT_STATE_ACTING)  ? 3.0f : 1.0f;
+    for (int i = 0; i < N_PARTICLES; i++) {
+        s_parts[i].angle += s_parts[i].speed * dt * partSpeedMul;
+        float nx = cx + cosf(s_parts[i].angle) * s_parts[i].radius;
+        float ny = cy + sinf(s_parts[i].angle) * s_parts[i].radius;
+        float dist = sqrtf((nx - cx)*(nx - cx) + (ny - cy)*(ny - cy));
+        int pa = (int)(120 + 80 * sinf(dist * 0.02f + s_time));
+        DrawCircle((int)nx, (int)ny, s_parts[i].size, alpha(col, pa));
+    }
+
+    /* Data flow lines — left and right panels to core */
+    float flowPhase = fmodf(s_time * 0.5f, 1.0f);
+    Vector2 centers[] = {
+        {(float)(40 + 300), 170.0f},
+        {(float)(s_width - 40 - 300), 170.0f}
+    };
+    for (int side = 0; side < 2; side++) {
+        Vector2 from = centers[side];
+        Vector2 to   = {(float)cx, (float)cy};
+        /* Dashed line */
+        for (float t = 0; t < 1.0f; t += 0.03f) {
+            float phase = fmodf(t + flowPhase, 0.06f);
+            if (phase < 0.04f) {
+                float lx = from.x + (to.x - from.x) * t;
+                float ly = from.y + (to.y - from.y) * t;
+                DrawPixel((int)lx, (int)ly, alpha(col, 40));
+            }
+        }
+        /* Traveling dot */
+        float dotT = fmodf(s_time * 0.3f + side * 0.5f, 1.0f);
+        float dx = from.x + (to.x - from.x) * dotT;
+        float dy = from.y + (to.y - from.y) * dotT;
+        DrawCircle((int)dx, (int)dy, 3, alpha(col, 180 - (int)(80 * dotT)));
     }
 
     DrawCircle(cx, cy, 30.0f + amplitude*5.0f, alpha(WHITE, 200));
