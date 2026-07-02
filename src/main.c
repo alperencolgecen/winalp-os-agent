@@ -31,6 +31,7 @@ static int s_pcm_count = 0;
 static void on_stt_result(const char *text, void *ud);
 static void on_partial_stt(const char *text, void *ud);
 static bool s_waiting_for_ai = false;
+static DWORD WINAPI ai_load_thread_proc(LPVOID arg);
 
 struct SttJob { float *buf; int count; int partial; };
 
@@ -80,6 +81,15 @@ static LONG CALLBACK global_veh(EXCEPTION_POINTERS *ep) {
         ExitProcess(1);
     }
     return EXCEPTION_CONTINUE_SEARCH;
+}
+
+static DWORD WINAPI ai_load_thread_proc(LPVOID arg) {
+    char *path = (char*)arg;
+    winalp_log(WINALP_LOG_INFO, "AI: loading model in background: %s", path);
+    bool ok = ai_engine_load_auto(path);
+    winalp_log(WINALP_LOG_INFO, ok ? "AI engine ready" : "AI engine failed");
+    free(path);
+    return 0;
 }
 
 int main(void) {
@@ -197,39 +207,6 @@ int main(void) {
         }
     }
 
-    bool ai_ok = false;
-    if (selected_model[0]) {
-        ai_ok = ai_engine_load_auto(selected_model);
-        if (ai_ok)
-            winalp_log(WINALP_LOG_INFO, "AI engine ready: %s", selected_model);
-        else
-            winalp_log(WINALP_LOG_WARN, "AI engine failed: %s", selected_model);
-    }
-
-    /* Auto-download a compatible AI model if none loaded */
-    if (!ai_ok) {
-        winalp_log(WINALP_LOG_INFO, "AI: no compatible model found — auto-downloading Qwen 1.5B Q4_K_M (~1GB)...");
-        /* Remove incompatible models to free space */
-        WIN32_FIND_DATA rmfd;
-        HANDLE rmh = FindFirstFileA("models\\*.gguf", &rmfd);
-        if (rmh != INVALID_HANDLE_VALUE) {
-            do {
-                if (strstr(rmfd.cFileName, "mmproj-") != NULL) continue;
-                char rmpath[1024];
-                snprintf(rmpath, sizeof(rmpath), "models\\%s", rmfd.cFileName);
-                DeleteFileA(rmpath);
-                winalp_log(WINALP_LOG_INFO, "AI: removed incompatible model %s", rmfd.cFileName);
-            } while (FindNextFileA(rmh, &rmfd));
-            FindClose(rmh);
-        }
-        system("powershell -Command \"Invoke-WebRequest -Uri 'https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf' -OutFile 'models\\brain-model.gguf' -UseBasicParsing\"");
-        ai_ok = ai_engine_load_auto("models/brain-model.gguf");
-        if (ai_ok)
-            winalp_log(WINALP_LOG_INFO, "AI engine ready after auto-download");
-        else
-            winalp_log(WINALP_LOG_WARN, "AI: auto-download failed");
-    }
-
     prompt_engine_init("prompts");
     plugin_manager_init("plugins");
     plugin_manager_scan();
@@ -264,7 +241,39 @@ int main(void) {
     thread_pool_start_all();
 
     tts_engine_init();
+
+    /* Open main UI immediately — model loads in background */
     ui_render_init(1280, 720, "WinAlp AI Assistant");
+
+    /* Start background AI model loading */
+    if (selected_model[0]) {
+        char *load_path = (char*)malloc(strlen(selected_model) + 1);
+        if (load_path) {
+            strcpy(load_path, selected_model);
+            HANDLE h = CreateThread(NULL, 0, ai_load_thread_proc, load_path, 0, NULL);
+            if (h) CloseHandle(h); else free(load_path);
+        }
+    }
+
+    /* Auto-download if no model was selected — blocks but shows loading screen */
+    if (!selected_model[0]) {
+        winalp_log(WINALP_LOG_INFO, "AI: no compatible model found — auto-downloading Qwen 1.5B Q4_K_M (~1GB)...");
+        ui_render_set_transcript("Downloading AI model...");
+        WIN32_FIND_DATA rmfd;
+        HANDLE rmh = FindFirstFileA("models\\*.gguf", &rmfd);
+        if (rmh != INVALID_HANDLE_VALUE) {
+            do {
+                if (strstr(rmfd.cFileName, "mmproj-") != NULL) continue;
+                char rmpath[1024];
+                snprintf(rmpath, sizeof(rmpath), "models\\%s", rmfd.cFileName);
+                DeleteFileA(rmpath);
+            } while (FindNextFileA(rmh, &rmfd));
+            FindClose(rmh);
+        }
+        system("powershell -Command \"Invoke-WebRequest -Uri 'https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf' -OutFile 'models\\brain-model.gguf' -UseBasicParsing\"");
+        ui_render_set_transcript("Loading AI model...");
+        ai_engine_load_auto("models/brain-model.gguf");
+    }
 
     char vision_buf[4096] = {0};
     int ctx_counter = 0;
