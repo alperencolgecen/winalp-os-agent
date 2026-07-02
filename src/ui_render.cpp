@@ -525,7 +525,8 @@ char *ui_render_model_select(ModelEntry *models, int n_models) {
         DrawTextEx(f, "Click a model to select  |  ESC to exit",
                    (Vector2){40, (float)(mh - 30)}, 12, 1, (Color){80,90,110,200});
 
-        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && hovered >= 0)
+        bool clicked = IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
+        if (clicked && hovered >= 0)
             selected = hovered;
 
         scroll -= (int)GetMouseWheelMove();
@@ -535,7 +536,9 @@ char *ui_render_model_select(ModelEntry *models, int n_models) {
 
         EndDrawing();
 
-        if (selected >= 0 && (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) || IsKeyPressed(KEY_ENTER))) {
+        bool confirm = IsKeyPressed(KEY_ENTER) ||
+                       (clicked && selected >= 0 && hovered == selected);
+        if (selected >= 0 && confirm) {
             char *result = (char*)malloc(strlen(models[selected].path) + 1);
             if (result) strcpy(result, models[selected].path);
             CloseWindow();

@@ -4,14 +4,22 @@
 #include "whisper.h"
 #include <stdlib.h>
 #include <string.h>
+#include <windows.h>
 
 static struct whisper_context *s_ctx = NULL;
+static CRITICAL_SECTION s_stt_lock;
+static int s_lock_inited = 0;
 
 bool stt_engine_is_loaded(void) {
     return s_ctx != NULL;
 }
 
 bool stt_engine_load(const char *model_path) {
+    if (!s_lock_inited) {
+        InitializeCriticalSection(&s_stt_lock);
+        s_lock_inited = 1;
+    }
+
     if (s_ctx) {
         whisper_free(s_ctx);
         s_ctx = NULL;
@@ -52,6 +60,8 @@ void stt_engine_process(const float *pcm, int n_samples, TranscriptCallback cb, 
         return;
     }
 
+    EnterCriticalSection(&s_stt_lock);
+
     whisper_full_params wparams = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
     wparams.print_progress   = false;
     wparams.print_realtime   = false;
@@ -68,12 +78,14 @@ void stt_engine_process(const float *pcm, int n_samples, TranscriptCallback cb, 
 
     if (whisper_full(s_ctx, wparams, pcm, n_samples) != 0) {
         winalp_log(WINALP_LOG_WARN, "STT: whisper_full failed");
+        LeaveCriticalSection(&s_stt_lock);
         if (cb) cb("", ud);
         return;
     }
 
     int n_segments = whisper_full_n_segments(s_ctx);
     if (n_segments == 0 && cb) {
+        LeaveCriticalSection(&s_stt_lock);
         cb("", ud);
         return;
     }
@@ -84,6 +96,8 @@ void stt_engine_process(const float *pcm, int n_samples, TranscriptCallback cb, 
             cb(text, ud);
         }
     }
+
+    LeaveCriticalSection(&s_stt_lock);
 }
 
 void stt_engine_unload(void) {
