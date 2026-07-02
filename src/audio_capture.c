@@ -14,7 +14,6 @@ static volatile int   s_writePos;                   /* producer index */
 static int            s_readPos;                    /* consumer index (snapshot) */
 static CRITICAL_SECTION s_lock;
 static bool           s_running = false;
-static bool           s_exclusive = false;
 
 static void capture_cb(ma_device *dev, void *out, const void *in, ma_uint32 frames) {
     (void)dev; (void)out;
@@ -87,14 +86,6 @@ float audio_capture_rms(void) {
         sum += (double)(s * s);
     }
     return (float)sqrt(sum / n);
-}
-
-void audio_capture_set_exclusive(bool excl) {
-    s_exclusive = excl;
-}
-
-bool audio_capture_is_exclusive(void) {
-    return s_exclusive;
 }
 
 int audio_capture_read(float *buf, int max_samples) {
