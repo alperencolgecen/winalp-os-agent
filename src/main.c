@@ -67,22 +67,6 @@ static bool confirm_cb(const char *desc, void *ud) {
     return ui_render_confirm_blocking("WinAlp — Confirm Action", desc);
 }
 
-/* Process-wide crash handler via VEH (catches ALL threads) */
-static LONG CALLBACK global_veh(EXCEPTION_POINTERS *ep) {
-    if (ep->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION) {
-        HANDLE h = CreateFileA("winalp_crash.log", GENERIC_WRITE, 0, NULL,
-                               CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-        if (h != INVALID_HANDLE_VALUE) {
-            const char *msg = "WinAlp crash: access violation\n";
-            DWORD written;
-            WriteFile(h, msg, (DWORD)strlen(msg), &written, NULL);
-            CloseHandle(h);
-        }
-        ExitProcess(1);
-    }
-    return EXCEPTION_CONTINUE_SEARCH;
-}
-
 static DWORD WINAPI ai_load_thread_proc(LPVOID arg) {
     char *path = (char*)arg;
     winalp_log(WINALP_LOG_INFO, "AI: loading model in background: %s", path);
@@ -97,10 +81,6 @@ int main(void) {
     srand((unsigned)time(NULL));
     winalp_log(WINALP_LOG_INFO, "WinAlp v%d.%d.%d starting...",
                WINALP_VERSION_MAJOR, WINALP_VERSION_MINOR, WINALP_VERSION_PATCH);
-
-    /* Global VEH catches all crash types silently (no dialog) */
-    AddVectoredExceptionHandler(1, global_veh);
-    SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX);
 
     memory_store_init("profile");
     memory_store_integrity_check();

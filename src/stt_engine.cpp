@@ -5,10 +5,22 @@
 #include <stdlib.h>
 #include <string.h>
 #include <windows.h>
+#include <setjmp.h>
 
 static struct whisper_context *s_ctx = NULL;
 static CRITICAL_SECTION s_stt_lock;
 static int s_lock_inited = 0;
+static jmp_buf s_stt_jmp;
+static bool s_stt_in_critical = false;
+
+static LONG CALLBACK stt_veh(EXCEPTION_POINTERS *ep) {
+    if (ep->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION &&
+        s_stt_in_critical) {
+        winalp_log(WINALP_LOG_ERROR, "STT: access violation caught, recovering...");
+        longjmp(s_stt_jmp, 1);
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
+}
 
 bool stt_engine_is_loaded(void) {
     return s_ctx != NULL;
@@ -61,42 +73,45 @@ void stt_engine_process(const float *pcm, int n_samples, TranscriptCallback cb, 
     }
 
     EnterCriticalSection(&s_stt_lock);
+    s_stt_in_critical = true;
 
-    whisper_full_params wparams = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
-    wparams.print_progress   = false;
-    wparams.print_realtime   = false;
-    wparams.print_special    = false;
-    wparams.print_timestamps = false;
-    wparams.suppress_blank   = true;
-    wparams.language         = "tr";
-    wparams.n_threads        = 4;
-    wparams.offset_ms        = 0;
-    wparams.no_context       = true;
-    wparams.single_segment   = true;
-
-    whisper_log_set(stt_log_cb, NULL);
-
-    if (whisper_full(s_ctx, wparams, pcm, n_samples) != 0) {
-        winalp_log(WINALP_LOG_WARN, "STT: whisper_full failed");
-        LeaveCriticalSection(&s_stt_lock);
-        if (cb) cb("", ud);
-        return;
+    PVOID veh = AddVectoredExceptionHandler(1, stt_veh);
+    bool crashed = false;
+    if (setjmp(s_stt_jmp) != 0) {
+        crashed = true;
+        winalp_log(WINALP_LOG_ERROR, "STT: crashed during whisper_full");
     }
 
-    int n_segments = whisper_full_n_segments(s_ctx);
-    if (n_segments == 0 && cb) {
-        LeaveCriticalSection(&s_stt_lock);
-        cb("", ud);
-        return;
-    }
+    if (!crashed) {
+        whisper_full_params wparams = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
+        wparams.print_progress   = false;
+        wparams.print_realtime   = false;
+        wparams.print_special    = false;
+        wparams.print_timestamps = false;
+        wparams.suppress_blank   = true;
+        wparams.language         = "tr";
+        wparams.n_threads        = 4;
+        wparams.offset_ms        = 0;
+        wparams.no_context       = true;
+        wparams.single_segment   = true;
 
-    for (int i = 0; i < n_segments; i++) {
-        const char *text = whisper_full_get_segment_text(s_ctx, i);
-        if (text && text[0] != '\0' && cb) {
-            cb(text, ud);
+        whisper_log_set(stt_log_cb, NULL);
+
+        if (whisper_full(s_ctx, wparams, pcm, n_samples) != 0) {
+            winalp_log(WINALP_LOG_WARN, "STT: whisper_full failed");
+        } else {
+            int n_segments = whisper_full_n_segments(s_ctx);
+            for (int i = 0; i < n_segments; i++) {
+                const char *text = whisper_full_get_segment_text(s_ctx, i);
+                if (text && text[0] != '\0' && cb) {
+                    cb(text, ud);
+                }
+            }
         }
     }
 
+    RemoveVectoredExceptionHandler(veh);
+    s_stt_in_critical = false;
     LeaveCriticalSection(&s_stt_lock);
 }
 
