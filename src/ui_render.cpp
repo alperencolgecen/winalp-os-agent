@@ -13,7 +13,20 @@ extern "C" {
 #include <cmath>
 #include <cstring>
 #include <cstdlib>
+#include <atomic>
 #include "raylib.h"
+
+/* Spinlock for thread-safe chat/transcript access (no windows.h needed) */
+static std::atomic_flag s_ui_lock = ATOMIC_FLAG_INIT;
+
+static void ui_lock(void) {
+    while (s_ui_lock.test_and_set(std::memory_order_acquire))
+        ;
+}
+
+static void ui_unlock(void) {
+    s_ui_lock.clear(std::memory_order_release);
+}
 
 static int s_width = 1280;
 static int s_height = 720;
@@ -435,22 +448,33 @@ static void draw_top_bar(void) {
 
 /* ── Chat Panel ── */
 static void draw_chat_panel(void) {
-    if (s_chat_count == 0) return;
-    int show = s_chat_count > 6 ? 6 : s_chat_count;
+    /* Snapshot last messages under lock */
+    ui_lock();
+    int cc = s_chat_count, ch = s_chat_head;
+    if (cc == 0) { ui_unlock(); return; }
+    int show = cc > 6 ? 6 : cc;
+    int start = show >= cc ? ch : (ch + cc - show) % MAX_CHAT;
+    char snap_role[6][32];
+    char snap_text[6][512];
+    char snap_src[6][16];
+    for (int i = 0; i < show; i++) {
+        int idx = (start + i) % MAX_CHAT;
+        strncpy(snap_role[i], s_chat_role[idx], sizeof(snap_role[i]) - 1);
+        strncpy(snap_text[i], s_chat_text[idx], sizeof(snap_text[i]) - 1);
+        strncpy(snap_src[i],  s_chat_src[idx],  sizeof(snap_src[i]) - 1);
+    }
+    ui_unlock();
+
     int pw = 500, px = (s_width - pw) / 2, py = s_height - 220, ph = show * 24 + 20;
-    Color bg = (Color){8, 12, 20, 180};
-    DrawRectangle(px, py - ph, pw, ph, bg);
+    DrawRectangle(px, py - ph, pw, ph, (Color){8, 12, 20, 180});
     DrawRectangleLines(px, py - ph, pw, ph, (Color){0, 212, 255, 40});
 
     int y = py - ph + 12;
-    int start = show >= s_chat_count ? s_chat_head : (s_chat_head + s_chat_count - show) % MAX_CHAT;
     for (int i = 0; i < show; i++) {
-        int idx = (start + i) % MAX_CHAT;
-        bool is_user = (strcmp(s_chat_role[idx], "user") == 0);
+        bool is_user = (strcmp(snap_role[i], "user") == 0);
         Color role_col = is_user ? (Color){0, 212, 255, 220} : (Color){0, 255, 100, 220};
-        const char *icon = s_chat_src[idx][0] ? s_chat_src[idx] : "";
-        char line[CHAT_LEN + 20];
-        snprintf(line, sizeof(line), "%s %s", icon, s_chat_text[idx]);
+        char line[520];
+        snprintf(line, sizeof(line), "%s %s", snap_src[i], snap_text[i]);
         DrawTextEx(s_font, line, (Vector2){(float)(px + 12), (float)y}, 11, 1, role_col);
         y += 24;
     }
@@ -536,7 +560,9 @@ static void draw_quick_status(void) {
 /* ── Overlay ── */
 static void draw_transcript(void) {
     char txt[4096];
+    ui_lock();
     strncpy(txt, (const char*)s_transcript, sizeof(txt) - 1);
+    ui_unlock();
     if (!txt[0]) return;
 
     bool listening = (strcmp(txt, "Listening...") == 0);
@@ -796,12 +822,14 @@ void ui_render_shutdown(void) {
 
 void ui_render_push_chat(const char *role, const char *text, const char *source_icon) {
     if (!role || !text) return;
+    ui_lock();
     int idx = (s_chat_head + s_chat_count) % MAX_CHAT;
     strncpy(s_chat_role[idx], role, sizeof(s_chat_role[0]) - 1);
     strncpy(s_chat_text[idx], text, sizeof(s_chat_text[0]) - 1);
     strncpy(s_chat_src[idx], source_icon ? source_icon : "", sizeof(s_chat_src[0]) - 1);
     if (s_chat_count < MAX_CHAT) s_chat_count++;
     else s_chat_head = (s_chat_head + 1) % MAX_CHAT;
+    ui_unlock();
 }
 
 void ui_render_set_context_label(const char *label) {
@@ -813,7 +841,9 @@ void ui_render_set_profile_label(const char *label) {
 }
 
 void ui_render_set_transcript(const char *text) {
+    ui_lock();
     strncpy((char*)s_transcript, text ? text : "", sizeof(s_transcript) - 1);
+    ui_unlock();
 }
 
 void ui_render_set_task_strip(const char *tasks) {
