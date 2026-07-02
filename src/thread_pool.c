@@ -12,7 +12,6 @@
 #include <windows.h>
 #include <stdio.h>
 #include <string.h>
-#include <signal.h>
 #include <setjmp.h>
 #include <stdlib.h>
 
@@ -178,12 +177,17 @@ static DWORD WINAPI stt_thread(LPVOID arg) {
 }
 
 /* ---------- AI thread ---------- */
-/* Crash recovery for AI inference */
+/* Crash recovery via Vectored Exception Handler (works on all Windows) */
 static jmp_buf s_ai_jmp;
+static DWORD s_ai_thread_id = 0;
 
-static void ai_sig_handler(int sig) {
-    (void)sig;
-    longjmp(s_ai_jmp, 1);
+static LONG CALLBACK ai_veh(EXCEPTION_POINTERS *ep) {
+    if (ep->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION &&
+        GetCurrentThreadId() == s_ai_thread_id) {
+        winalp_log(WINALP_LOG_ERROR, "AI: access violation caught by VEH, recovering...");
+        longjmp(s_ai_jmp, 1);
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
 }
 
 /* Accumulator passed as userdata to on_ai_token */
@@ -253,14 +257,15 @@ static DWORD WINAPI ai_thread(LPVOID arg) {
         as.len = 0;
 
         volatile int ai_crashed = 0;
-        void (*old_sig)(int) = signal(SIGSEGV, ai_sig_handler);
+        s_ai_thread_id = GetCurrentThreadId();
+        PVOID veh = AddVectoredExceptionHandler(1, ai_veh);
         if (setjmp(s_ai_jmp) == 0) {
             ai_engine_infer(transcript, on_ai_token, &as);
         } else {
             ai_crashed = 1;
             winalp_log(WINALP_LOG_ERROR, "AI: crashed during inference");
         }
-        signal(SIGSEGV, old_sig);
+        RemoveVectoredExceptionHandler(veh);
 
         if (ai_crashed) {
             queue_push(&s_ai_response_q, "(AI engine crashed during inference)");
