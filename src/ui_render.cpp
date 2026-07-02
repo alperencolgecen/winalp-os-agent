@@ -56,6 +56,29 @@ static char s_chat_src[MAX_CHAT][16];
 static int s_chat_count = 0;
 static int s_chat_head = 0;
 
+/* Notification queue for quick status cards */
+#define MAX_NOTIFS 8
+typedef struct {
+    char text[256];
+    Color color;
+    double start_time;
+    double duration;
+} Notif;
+static Notif s_notifs[MAX_NOTIFS];
+static int s_notif_count = 0;
+static int s_notif_head = 0;
+
+void ui_render_push_notification(const char *text, int r, int g, int b, double duration_sec) {
+    if (!text || !text[0]) return;
+    int idx = (s_notif_head + s_notif_count) % MAX_NOTIFS;
+    strncpy(s_notifs[idx].text, text, sizeof(s_notifs[idx].text) - 1);
+    s_notifs[idx].color = (Color){(unsigned char)r, (unsigned char)g, (unsigned char)b, 220};
+    s_notifs[idx].start_time = s_time;
+    s_notifs[idx].duration = duration_sec;
+    if (s_notif_count < MAX_NOTIFS) s_notif_count++;
+    else s_notif_head = (s_notif_head + 1) % MAX_NOTIFS;
+}
+
 /* Turkish character codepoints (UTF-16) */
 #define FONT_CP_CNT (256 + 12)
 static int s_font_cps[FONT_CP_CNT];
@@ -142,20 +165,35 @@ static void draw_grid(void) {
 }
 
 static void draw_panel_bg(int x, int y, int w, int h, Color accent) {
+    /* Glass background — more transparent */
+    DrawRectangle(x, y, w, h, (Color){0, 20, 50, 20});
+
+    /* Subtle top highlight gradient */
+    DrawRectangle(x, y, w, 2, alpha(accent, 30));
+    DrawRectangle(x, y, w, 1, alpha(accent, 60));
+
+    /* Bottom-right corner cut */
     Vector2 pts[6] = {
         {(float)x, (float)y},
         {(float)(x + w), (float)y},
-        {(float)(x + w), (float)(y + h - 15)},
-        {(float)(x + w - 15), (float)(y + h)},
+        {(float)(x + w), (float)(y + h - 12)},
+        {(float)(x + w - 12), (float)(y + h)},
         {(float)x, (float)(y + h)},
         {(float)x, (float)y}
     };
-    DrawTriangleFan(pts, 6, (Color){0, 40, 80, 50});
     DrawLineStrip(pts, 6, alpha(accent, 80));
-    
-    DrawLine(x - 2, y, x + 15, y, accent);
-    DrawLine(x, y - 2, x, y + 15, accent);
-    DrawLine(x + w, y + h - 15, x + w - 15, y + h, accent);
+
+    /* Corner glow dots */
+    DrawCircle(x, y, 3, alpha(accent, 120));
+    DrawCircle(x + w, y + h, 3, alpha(accent, 120));
+
+    /* Top-left L-bracket */
+    DrawLine(x + 2, y - 1, x + 18, y - 1, accent);
+    DrawLine(x - 1, y + 2, x - 1, y + 18, accent);
+
+    /* Bottom-right L-bracket */
+    DrawLine(x + w - 2, y + h + 1, x + w - 18, y + h + 1, accent);
+    DrawLine(x + w + 1, y + h - 2, x + w + 1, y + h - 18, accent);
 }
 
 /* ── Jarvis Arc Reactor ── */
@@ -429,8 +467,70 @@ static void draw_footer(void) {
     DrawTextEx(s_font, label, (Vector2){(float)(fx+1), (float)fy}, 24, 8, alpha((Color){0,243,255,255}, 100));
 }
 
-/* ── Quick Status ── */
+/* ── Quick Status Cards ── */
 static void draw_quick_status(void) {
+    /* System warning cards (always shown when triggered) */
+    int card_y = 160;
+
+    /* CPU high warning */
+    if (s_sys.cpu_percent > 80.0f) {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "CPU: %.0f%%", s_sys.cpu_percent);
+        int cw = 200, ch = 28;
+        int cx = s_width - cw - 40;
+        DrawRectangle(cx, card_y, cw, ch, (Color){80, 20, 10, 180});
+        DrawRectangle(cx, card_y, 3, ch, (Color){245, 158, 11, 220});
+        DrawTextEx(s_font, buf, (Vector2){(float)(cx + 12), (float)(card_y + 6)}, 12, 1, (Color){245, 158, 11, 220});
+        card_y += 34;
+    }
+
+    /* RAM high warning */
+    float ram_pct = s_sys.ram_total_mb ? (float)s_sys.ram_used_mb / (float)s_sys.ram_total_mb : 0;
+    if (ram_pct > 0.85f) {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "RAM: %llu/%llu MB", s_sys.ram_used_mb, s_sys.ram_total_mb);
+        int cw = 240, ch = 28;
+        int cx = s_width - cw - 40;
+        DrawRectangle(cx, card_y, cw, ch, (Color){80, 20, 10, 180});
+        DrawRectangle(cx, card_y, 3, ch, (Color){220, 40, 40, 220});
+        DrawTextEx(s_font, buf, (Vector2){(float)(cx + 12), (float)(card_y + 6)}, 12, 1, (Color){220, 40, 40, 220});
+        card_y += 34;
+    }
+
+    /* Battery warning */
+    if (s_sys.battery_percent >= 0 && s_sys.battery_percent <= 20 && !s_sys.ac_power) {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "BATTERY: %d%%", s_sys.battery_percent);
+        int cw = 180, ch = 28;
+        int cx = s_width - cw - 40;
+        Color bc = s_sys.battery_percent <= 10 ? (Color){220, 40, 40, 220} : (Color){245, 158, 11, 220};
+        DrawRectangle(cx, card_y, cw, ch, (Color){80, 20, 10, 180});
+        DrawRectangle(cx, card_y, 3, ch, bc);
+        DrawTextEx(s_font, buf, (Vector2){(float)(cx + 12), (float)(card_y + 6)}, 12, 1, bc);
+        card_y += 34;
+    }
+
+    /* Transient notification cards from queue */
+    for (int i = 0; i < s_notif_count; i++) {
+        int idx = (s_notif_head + i) % MAX_NOTIFS;
+        double elapsed = s_time - s_notifs[idx].start_time;
+        if (elapsed > s_notifs[idx].duration) continue;
+
+        float fade = 1.0f;
+        if (elapsed > s_notifs[idx].duration - 1.0f)
+            fade = (float)(s_notifs[idx].duration - elapsed);
+
+        int cw = 260, ch = 32;
+        int cx = s_width - cw - 40;
+        int ny = s_height - 120 - (s_notif_count - i) * 38;
+
+        Color bg = (Color){0, 20, 50, (unsigned char)(160 * fade)};
+        DrawRectangle(cx, ny, cw, ch, bg);
+        DrawRectangle(cx, ny, 3, ch, alpha(s_notifs[idx].color, (unsigned char)(200 * fade)));
+        DrawTextEx(s_font, s_notifs[idx].text,
+                   (Vector2){(float)(cx + 12), (float)(ny + 8)},
+                   11, 1, alpha(s_notifs[idx].color, (unsigned char)(220 * fade)));
+    }
 }
 
 /* ── Overlay ── */

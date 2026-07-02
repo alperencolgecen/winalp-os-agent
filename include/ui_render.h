@@ -39,6 +39,7 @@ void ui_render_set_profile_label(const char *label);
 void ui_render_set_transcript(const char *text);
 void ui_render_set_task_strip(const char *tasks);
 void ui_render_set_theme_float(const char *key, float value);
+void ui_render_push_notification(const char *text, int r, int g, int b, double duration_sec);
 bool ui_render_should_close(void);
 void ui_render_shutdown(void);
 

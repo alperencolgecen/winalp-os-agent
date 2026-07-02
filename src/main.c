@@ -190,6 +190,7 @@ int main(void) {
 
     /* Open main UI immediately — model loads in background */
     ui_render_init(1280, 720, "WinAlp AI Assistant");
+    ui_render_push_notification("System ONLINE", 0, 243, 255, 4.0);
 
     /* Start background AI model loading */
     if (selected_model[0]) {
@@ -258,6 +259,7 @@ int main(void) {
             ui_render_push_chat("assistant", response, "[AI]");
             memory_store_append_message("assistant", "ai", response);
             tts_engine_speak_async(response);
+            ui_render_push_notification("AI response delivered", 0, 255, 100, 4.0);
             s_waiting_for_ai = false;
         }
 
