@@ -12,6 +12,9 @@
 #include <windows.h>
 #include <stdio.h>
 #include <string.h>
+#include <signal.h>
+#include <setjmp.h>
+#include <stdlib.h>
 
 /* ---------- thread-safe message queues ---------- */
 #define QUEUE_SIZE 16
@@ -175,6 +178,14 @@ static DWORD WINAPI stt_thread(LPVOID arg) {
 }
 
 /* ---------- AI thread ---------- */
+/* Crash recovery for AI inference */
+static jmp_buf s_ai_jmp;
+
+static void ai_sig_handler(int sig) {
+    (void)sig;
+    longjmp(s_ai_jmp, 1);
+}
+
 /* Accumulator passed as userdata to on_ai_token */
 typedef struct {
     char buf[4096];
@@ -236,15 +247,28 @@ static DWORD WINAPI ai_thread(LPVOID arg) {
             continue;
         }
 
-        /* Run inference with accumulator callback */
+        /* Run inference with accumulator callback, crash-protected */
         AccumState as;
         as.buf[0] = '\0';
         as.len = 0;
-        ai_engine_infer(transcript, on_ai_token, &as);
-        if (as.len > 0)
+
+        volatile int ai_crashed = 0;
+        void (*old_sig)(int) = signal(SIGSEGV, ai_sig_handler);
+        if (setjmp(s_ai_jmp) == 0) {
+            ai_engine_infer(transcript, on_ai_token, &as);
+        } else {
+            ai_crashed = 1;
+            winalp_log(WINALP_LOG_ERROR, "AI: crashed during inference");
+        }
+        signal(SIGSEGV, old_sig);
+
+        if (ai_crashed) {
+            queue_push(&s_ai_response_q, "(AI engine crashed during inference)");
+        } else if (as.len > 0) {
             queue_push(&s_ai_response_q, as.buf);
-        else
+        } else {
             queue_push(&s_ai_response_q, "(empty response)");
+        }
     }
     winalp_log(WINALP_LOG_INFO, "thread_pool: AI thread stopped");
     return 0;

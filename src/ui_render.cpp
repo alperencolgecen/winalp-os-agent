@@ -522,12 +522,20 @@ char *ui_render_model_select(ModelEntry *models, int n_models) {
             DrawTextEx(f, rl, (Vector2){(float)(mw - 180), (float)(cy + 9)}, 12, 1, cc);
         }
 
-        DrawTextEx(f, "Click a model to select  |  ESC to exit",
+        DrawTextEx(f, "Double-click to select  |  Enter to confirm  |  ESC to exit",
                    (Vector2){40, (float)(mh - 30)}, 12, 1, (Color){80,90,110,200});
 
         bool clicked = IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
-        if (clicked && hovered >= 0)
+        if (clicked && hovered >= 0) {
+            if (selected == hovered) {
+                /* Second click on same item → confirm */
+                char *result = (char*)malloc(strlen(models[selected].path) + 1);
+                if (result) strcpy(result, models[selected].path);
+                CloseWindow();
+                return result;
+            }
             selected = hovered;
+        }
 
         scroll -= (int)GetMouseWheelMove();
         if (scroll < 0) scroll = 0;
@@ -536,9 +544,8 @@ char *ui_render_model_select(ModelEntry *models, int n_models) {
 
         EndDrawing();
 
-        bool confirm = IsKeyPressed(KEY_ENTER) ||
-                       (clicked && selected >= 0 && hovered == selected);
-        if (selected >= 0 && confirm) {
+        /* Enter key also confirms */
+        if (selected >= 0 && IsKeyPressed(KEY_ENTER)) {
             char *result = (char*)malloc(strlen(models[selected].path) + 1);
             if (result) strcpy(result, models[selected].path);
             CloseWindow();
