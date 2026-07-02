@@ -78,10 +78,10 @@ static void on_stt_result(const char *text, void *ud) {
 }
 
 /* VAD state machine */
-#define VAD_THRESHOLD_ON  0.45f   /* speech start threshold */
-#define VAD_THRESHOLD_OFF 0.25f   /* speech end threshold (hysteresis) */
-#define VAD_SILENCE_MS    800     /* ms of silence before declaring speech ended */
-#define VAD_MIN_SPEECH_MS 300     /* minimum speech duration to trigger STT */
+#define VAD_THRESHOLD_ON  0.025f  /* speech start threshold */
+#define VAD_THRESHOLD_OFF 0.012f  /* speech end threshold (hysteresis) */
+#define VAD_SILENCE_MS    1000    /* ms of silence before declaring speech ended */
+#define VAD_MIN_SPEECH_MS 200     /* minimum speech duration to trigger STT */
 #define VAD_MAX_SPEECH_MS 8000    /* max speech capture before forced STT */
 #define VAD_SAMPLE_RATE   16000
 
@@ -98,6 +98,20 @@ static DWORD WINAPI stt_thread(LPVOID arg) {
     int silence_ms = 0;
     int speech_ms = 0;
 
+    /* Startup amplitude test — log RMS values for 2 seconds */
+    {
+        winalp_log(WINALP_LOG_INFO, "thread_pool: VAD: measuring ambient noise for 2s...");
+        float max_amp = 0;
+        for (int i = 0; i < 40; i++) {
+            if (!audio_capture_is_initialised()) break;
+            float a = audio_capture_rms();
+            if (a > max_amp) max_amp = a;
+            Sleep(50);
+        }
+        winalp_log(WINALP_LOG_INFO, "thread_pool: VAD: ambient noise max=%.4f  threshold=%.3f",
+                   max_amp, VAD_THRESHOLD_ON);
+    }
+
     while (s_running) {
         if (!audio_capture_is_initialised()) {
             Sleep(50);
@@ -105,6 +119,11 @@ static DWORD WINAPI stt_thread(LPVOID arg) {
         }
 
         float amplitude = audio_capture_rms();
+
+        /* Log amplitude every ~100 iterations for debugging */
+        static int amp_log;
+        if (++amp_log % 100 == 0)
+            winalp_log(WINALP_LOG_DEBUG, "thread_pool: VAD amplitude=%.4f state=%d", amplitude, vad_state);
 
         switch (vad_state) {
             case 0: /* Silence — waiting for speech */
@@ -122,10 +141,11 @@ static DWORD WINAPI stt_thread(LPVOID arg) {
                         vad_state = 2;
                         silence_ms = 0;
                         s_vad_count = 0;
-                        winalp_log(WINALP_LOG_INFO, "thread_pool: VAD: speech started");
+                        winalp_log(WINALP_LOG_INFO, "thread_pool: VAD: speech started (amp=%.4f)", amplitude);
                     }
                 } else {
                     vad_state = 0;
+                    winalp_log(WINALP_LOG_DEBUG, "thread_pool: VAD: false alarm (amp=%.4f)", amplitude);
                 }
                 Sleep(50);
                 break;
